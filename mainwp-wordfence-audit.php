@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MainWP Wordfence Audit
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
- * Version: 0.3.2
+ * Version: 0.3.3
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -13,6 +13,8 @@ final class MWA_Audit {
     const INDEX_FILE = 'mainwp-wordfence-audit-index.json';
     const LAST = 'mwa_wordfence_feed_updated';
     const ENDPOINT = 'https://www.wordfence.com/api/intelligence/v3/vulnerabilities/scanner';
+    const PRODUCTION_ENDPOINT = 'https://www.wordfence.com/api/intelligence/v3/vulnerabilities/production';
+    const SEVERITY_UPDATED = 'mwa_severity_updated';
     const ERROR_OPTION = 'mwa_last_feed_error';
     const NEXT_ATTEMPT = 'mwa_next_feed_attempt';
     const IGNORED = 'mwa_ignored_findings_v1';
@@ -21,6 +23,7 @@ final class MWA_Audit {
         add_action('admin_menu', [__CLASS__, 'menu']);
         add_action('admin_post_mwa_save_key', [__CLASS__, 'save_key']);
         add_action('admin_post_mwa_refresh', [__CLASS__, 'refresh']);
+        add_action('admin_post_mwa_enrich', [__CLASS__, 'enrich_severity']);
         add_action('admin_post_mwa_ignore', [__CLASS__, 'ignore_action']);
         add_action('admin_post_mwa_inventory', [__CLASS__, 'inventory_refresh']);
     }
@@ -90,7 +93,7 @@ final class MWA_Audit {
             if ($score>=4) return 'Medium ('.number_format($score,1).')';
             return 'Low ('.number_format($score,1).')';
         }
-        return 'Unknown';
+        return 'Not rated';
     }
     private static function action_form($key,$mode,$label) {
         echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="display:inline">';
@@ -159,6 +162,76 @@ final class MWA_Audit {
         delete_option(self::CACHE); // Remove legacy oversized option.
         update_option(self::LAST, time(), false);
         self::redirect('updated');
+    }
+    public static function enrich_severity() {
+        if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
+        check_admin_referer('mwa_enrich');
+        $key = get_option(self::OPT_KEY, '');
+        if (!$key) self::redirect('no_key');
+        if (time() < (int)get_option(self::NEXT_ATTEMPT,0)) self::redirect('throttled');
+        $old = self::cached_index();
+        if (!$old) self::redirect('no_scanner_feed');
+        // The shared cooldown applies to both Wordfence endpoints.
+        update_option(self::NEXT_ATTEMPT,time()+self::MIN_INTERVAL,false);
+        $dir=self::storage_dir();
+        if (is_wp_error($dir)) self::feed_error('Cache directory unavailable: '.$dir->get_error_code());
+        $tmp=wp_tempnam('mwa-wordfence-production.json');
+        if (!$tmp) self::feed_error('Could not create a temporary file.');
+        $res=wp_remote_get(self::PRODUCTION_ENDPOINT,[
+            'timeout'=>180,'redirection'=>0,'stream'=>true,'filename'=>$tmp,
+            'headers'=>['Authorization'=>'Bearer '.$key,'Accept'=>'application/json'],
+        ]);
+        if (is_wp_error($res)) {
+            @unlink($tmp);
+            self::feed_error('WordPress HTTP error: '.$res->get_error_code());
+        }
+        $code=(int)wp_remote_retrieve_response_code($res);
+        if ($code===429) {
+            $retry=wp_remote_retrieve_header($res,'retry-after');
+            $seconds=is_numeric($retry)?max(0,(int)$retry):(is_string($retry)&&strtotime($retry)?max(0,strtotime($retry)-time()):0);
+            update_option(self::NEXT_ATTEMPT,time()+max(3600,$seconds),false);
+        }
+        if ($code!==200) {
+            @unlink($tmp);
+            self::feed_error('Wordfence production feed HTTP '.$code);
+        }
+        $wanted=array_fill_keys(array_keys($old),true);
+        $production=self::stream_index($tmp,$wanted);
+        @unlink($tmp);
+        if (is_wp_error($production)) self::feed_error('Production feed validation failed: '.$production->get_error_code());
+        if (empty($production['seen'])) self::feed_error('Production feed contained no vulnerability records.');
+        $details=[];
+        foreach ($production['matches'] as $entries) {
+            foreach ($entries as $entry) {
+                $details[(string)$entry['id']]=$entry['row'];
+            }
+        }
+        $enriched=0;
+        foreach ($old as &$entries) {
+            foreach ($entries as &$entry) {
+                $record=$details[(string)$entry['id']]??null;
+                if (!is_array($record)) continue;
+                $cvss=$record['cvss']??null;
+                if (!is_array($cvss) || !isset($cvss['score']) || !is_numeric($cvss['score'])) continue;
+                $entry['row']['cvss']=$cvss;
+                $enriched++;
+            }
+            unset($entry);
+        }
+        unset($entries);
+        $payload=wp_json_encode($old);
+        if (!is_string($payload)) self::feed_error('Could not encode enriched index.');
+        $target=trailingslashit($dir).self::INDEX_FILE;
+        $stage=$target.'.tmp-'.wp_generate_password(12,false,false);
+        if (file_put_contents($stage,$payload,LOCK_EX)===false || !@rename($stage,$target)) {
+            @unlink($stage);
+            self::feed_error('Could not save enriched index.');
+        }
+        @chmod($target,0600);
+        update_option(self::SEVERITY_UPDATED,time(),false);
+        update_option('mwa_severity_enriched_count',$enriched,false);
+        delete_option(self::ERROR_OPTION);
+        self::redirect('severity_updated');
     }
     private static function storage_dir() {
         $uploads = wp_get_upload_dir();
@@ -361,7 +434,7 @@ final class MWA_Audit {
             if ($site!=='' && $pair[0]['site']!==$site) return false;
             if ($severity!=='all') {
                 $value=self::severity($pair[1]);
-                if ($severity==='unknown') return $value==='Unknown';
+                if ($severity==='unknown') return $value==='Not rated';
                 if (strtolower(strtok($value,' '))!==$severity) return false;
             }
             return true;
@@ -386,7 +459,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.3.2</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.3.3</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -429,6 +502,8 @@ final class MWA_Audit {
         echo '<p><strong>Wordfence feed:</strong> '.($when?esc_html(wp_date('Y-m-d H:i:s T',$when)):'Not yet downloaded').'</p>';
         echo '<p><strong>API key:</strong> '.($key_present?'Configured (not validated)':'Missing').' · <a href="'.esc_url(add_query_arg('mwa_tab','settings',$base)).'">API settings</a></p>';
         echo '<p><strong>Next Wordfence request:</strong> '.($cooldown?esc_html(wp_date('Y-m-d H:i:s T',$next)).' ('.esc_html(human_time_diff(time(),$next)).' remaining)':'Available now').'</p>';
+        $severity_when=(int)get_option(self::SEVERITY_UPDATED,0);
+        echo '<p><strong>Severity data:</strong> '.($severity_when?esc_html(wp_date('Y-m-d H:i:s T',$severity_when)).' ('.esc_html((string)get_option('mwa_severity_enriched_count',0)).' records enriched)':'Not loaded (scanner feed does not contain CVSS)').'</p>';
         echo '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:14px">';
         echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="margin:0"><input type="hidden" name="action" value="mwa_inventory">';
         wp_nonce_field('mwa_inventory');
@@ -437,6 +512,10 @@ final class MWA_Audit {
         echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="margin:0"><input type="hidden" name="action" value="mwa_refresh">';
         wp_nonce_field('mwa_refresh');
         submit_button('Refresh Wordfence feed','secondary','submit',false,($cooldown || !$key_present)?['disabled'=>'disabled']:[]);
+        echo '</form>';
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="margin:0"><input type="hidden" name="action" value="mwa_enrich">';
+        wp_nonce_field('mwa_enrich');
+        submit_button('Load severity ratings','secondary','submit',false,($cooldown || !$key_present || !$when)?['disabled'=>'disabled']:[]);
         echo '</form></div>';
         echo '<p class="description" style="margin-bottom:0">MainWP recheck uses locally synced inventory without API calls. Use MainWP Sync to retrieve fresh data from child sites. Wordfence refresh downloads the external feed and is rate-limited.</p></div>';
         if (isset($_GET['mwa_status'])) {
@@ -448,6 +527,8 @@ final class MWA_Audit {
                 'no_key'=>'Enter and save an API key before refreshing.',
                 'invalid_key'=>'The API key contains invalid characters.',
                 'api_error'=>'The last feed refresh failed.',
+                'severity_updated'=>'Severity data updated from the Wordfence production feed.',
+                'no_scanner_feed'=>'Refresh the scanner feed before loading severity data.',
                 'inventory_refreshed'=>'MainWP inventory reloaded from the local dashboard database. No remote sync was triggered.',
                 'ignored'=>'Finding ignored.',
                 'restored'=>'Finding restored.',
