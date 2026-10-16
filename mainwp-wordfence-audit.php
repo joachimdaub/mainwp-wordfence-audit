@@ -315,7 +315,7 @@ final class MWA_Audit {
         wp_nonce_field('mwa_save_key');echo '<label for="mwa-key">Wordfence v3 API-Key:</label> <input id="mwa-key" type="password" name="api_key" autocomplete="new-password" size="35" placeholder="Neuen Key eingeben (leer = unverändert)"> ';
         submit_button('Key speichern','secondary','submit',false);echo '</form>';
         echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_refresh">';
-        wp_nonce_field('mwa_refresh');submit_button('Wordfence-Feed aktualisieren','primary','submit',false,['disabled'=>$cooldown || !$key_present]);echo '</form>';
+        wp_nonce_field('mwa_refresh');submit_button('Wordfence-Feed aktualisieren','primary','submit',false,($cooldown || !$key_present) ? ['disabled'=>'disabled'] : []);echo '</form>';
         if ($when && time()-$when>86400) echo '<p><strong>Hinweis:</strong> Der Feed ist älter als 24 Stunden.</p>';
         echo '<h2>Bestätigte Treffer nach Versionsbereich</h2>';
         self::table($hits);
