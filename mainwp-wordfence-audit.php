@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MainWP Wordfence Audit
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
- * Version: 0.1.0
+ * Version: 0.1.2
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -12,6 +12,9 @@ final class MWA_Audit {
     const CACHE = 'mwa_wordfence_feed_v1';
     const LAST = 'mwa_wordfence_feed_updated';
     const ENDPOINT = 'https://www.wordfence.com/api/intelligence/v3/vulnerabilities/scanner';
+    const ERROR_OPTION = 'mwa_last_feed_error';
+    const NEXT_ATTEMPT = 'mwa_next_feed_attempt';
+    const MIN_INTERVAL = 2700; // 45 minutes, above the default Wordfence limit.
     public static function init() {
         add_action('admin_menu', [__CLASS__, 'menu']);
         add_action('admin_post_mwa_save_key', [__CLASS__, 'save_key']);
@@ -33,23 +36,50 @@ final class MWA_Audit {
         if ($key !== '') update_option(self::OPT_KEY, $key, false);
         self::redirect('saved');
     }
+    private static function feed_error($message) {
+        update_option(self::ERROR_OPTION, sanitize_text_field($message), false);
+        self::redirect('api_error');
+    }
     public static function refresh() {
         if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
         check_admin_referer('mwa_refresh');
-        $last = (int)get_option('mwa_last_attempt', 0);
-        if ($last && time()-$last < 120) self::redirect('throttled');
-        update_option('mwa_last_attempt', time(), false);
         $key = get_option(self::OPT_KEY, '');
         if (!$key) self::redirect('no_key');
+        $next = (int) get_option(self::NEXT_ATTEMPT, 0);
+        if (time() < $next) self::redirect('throttled');
+        update_option(self::NEXT_ATTEMPT, time() + self::MIN_INTERVAL, false);
+        update_option('mwa_last_attempt', time(), false);
         $res = wp_remote_get(self::ENDPOINT, [
             'timeout'=>60, 'redirection'=>0,
             'headers'=>['Authorization'=>'Bearer '.$key,'Accept'=>'application/json'],
             'limit_response_size'=>35000000,
         ]);
-        if (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200) self::redirect('api_error');
+        if (is_wp_error($res)) self::feed_error('WordPress HTTP-Fehler: '.$res->get_error_code());
+        $http_code = (int) wp_remote_retrieve_response_code($res);
+        if ($http_code === 429) {
+            $retry = wp_remote_retrieve_header($res, 'retry-after');
+            $seconds = is_numeric($retry) ? max(0,(int)$retry) : (is_string($retry) && strtotime($retry) ? max(0,strtotime($retry)-time()) : 0);
+            update_option(self::NEXT_ATTEMPT, time() + max(3600,$seconds), false);
+        }
+        if ($http_code !== 200) {
+            $hints = [
+                400=>'Ungültige Anfrage.',
+                401=>'API-Key nicht akzeptiert.',
+                403=>'Zugriff verweigert.',
+                404=>'API-Endpunkt nicht gefunden.',
+                429=>'Rate-Limit erreicht. Bitte später erneut versuchen.',
+                500=>'Wordfence-Serverfehler.',
+                502=>'Wordfence-Gateway-Fehler.',
+                503=>'Wordfence vorübergehend nicht verfügbar.',
+            ];
+            self::feed_error('Wordfence HTTP '.$http_code.': '.($hints[$http_code]??'Unerwartete HTTP-Antwort.'));
+        }
         $body = wp_remote_retrieve_body($res);
         $data = json_decode($body,true);
-        if (!is_array($data) || json_last_error() !== JSON_ERROR_NONE || !$data || strlen($body)>=35000000) self::redirect('invalid_feed');
+        if (!is_array($data) || json_last_error() !== JSON_ERROR_NONE || !$data || strlen($body)>=35000000) {
+            self::feed_error('Antwort HTTP 200, aber JSON ungültig, leer oder Größenlimit (35 MB) erreicht; Bytes: '.strlen($body).'; JSON-Fehler: '.json_last_error_msg());
+        }
+        delete_option(self::ERROR_OPTION);
         // Store only vulnerability data, never user credentials, under private WordPress options.
         update_option(self::CACHE, $data, false);
         update_option(self::LAST, time(), false);
@@ -134,16 +164,22 @@ final class MWA_Audit {
                 elseif ($status==='unknown') $unknown[]=[$item,$v];
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.1.0</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.1.2</small></h1>';
         echo '<p>Nur lesender Abgleich des zuletzt von MainWP synchronisierten Inventars mit Wordfence Intelligence. Keine Updates auf Kundenseiten.</p>';
-        if (isset($_GET['mwa_status'])) echo '<div class="notice notice-info"><p>'.esc_html(sanitize_key(wp_unslash($_GET['mwa_status']))).'</p></div>';
+        if (isset($_GET['mwa_status'])) {
+            $status=sanitize_key(wp_unslash($_GET['mwa_status']));
+            echo '<div class="notice '.($status==='api_error'?'notice-error':'notice-info').'"><p>'.esc_html($status).'</p></div>';
+            if ($status==='api_error') echo '<div class="notice notice-error"><p>'.esc_html((string)get_option(self::ERROR_OPTION, 'Keine Details verfügbar.')).'</p></div>';
+        }
         if ($error) echo '<div class="notice notice-warning"><p>'.esc_html($error).'</p></div>';
         echo '<p>Feed: '.($when?esc_html(wp_date('d.m.Y H:i:s',$when)):'noch nicht geladen').' | Inventareinträge: '.esc_html((string)count($inventory)).' | Treffer: '.esc_html((string)count($hits)).' | Unklare Zuordnungen: '.esc_html((string)count($unknown)).'</p>';
         echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_save_key">';
         wp_nonce_field('mwa_save_key');echo '<label for="mwa-key">Wordfence v3 API-Key:</label> <input id="mwa-key" type="password" name="api_key" autocomplete="new-password" size="35" placeholder="Neuen Key eingeben (leer = unverändert)"> ';
         submit_button('Key speichern','secondary','submit',false);echo '</form>';
+        $next=(int)get_option(self::NEXT_ATTEMPT,0);
+        if (time()<$next) echo '<p><strong>Wordfence-Sperrfrist:</strong> Nächster Abruf frühestens '.esc_html(wp_date('d.m.Y H:i:s',$next)).'.</p>';
         echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_refresh">';
-        wp_nonce_field('mwa_refresh');submit_button('Wordfence-Feed aktualisieren','primary','submit',false);echo '</form>';
+        wp_nonce_field('mwa_refresh');submit_button('Wordfence-Feed aktualisieren','primary','submit',false,['disabled'=>time()<$next]);echo '</form>';
         if ($when && time()-$when>86400) echo '<p><strong>Hinweis:</strong> Der Feed ist älter als 24 Stunden.</p>';
         echo '<h2>Bestätigte Treffer nach Versionsbereich</h2>';
         self::table($hits);
