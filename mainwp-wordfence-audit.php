@@ -68,7 +68,7 @@ final class MWA_Audit {
                 }
             }
             if (!$valid) self::redirect('invalid_action');
-            $ignored[$key] = time();
+            $ignored[$key] = ['timestamp'=>time(), 'site'=>$item['site'], 'type'=>$item['type'], 'slug'=>$item['slug'], 'name'=>$item['name'], 'version'=>$item['version'], 'title'=>(string)($v['row']['title']??$v['id'])];
         } else {
             unset($ignored[$key]);
         }
@@ -399,8 +399,22 @@ final class MWA_Audit {
         self::table($hits);
         echo '<h2>Unklar / manuell prüfen</h2><p>Unbekannte Versionsformate oder unvollständige Bereiche werden nicht als sicher eingestuft.</p>';
         self::table($unknown);
-        echo '<h2>Ignored findings ('.esc_html((string)count($ignored_rows)).')</h2>';
+        echo '<h2>Ignored findings ('.esc_html((string)count($ignored)).')</h2>';
         self::table($ignored_rows, true);
+        $visible=[];
+        foreach ($ignored_rows as $pair) $visible[self::finding_key($pair[0],$pair[1])]=true;
+        $archived=array_diff_key($ignored,$visible);
+        if ($archived) {
+            echo '<h3>Ignored findings no longer in the current results</h3>';
+            echo '<table class="widefat striped"><thead><tr><th>Website</th><th>Plugin or Theme</th><th>Last known version</th><th>Vulnerability</th><th>Action</th></tr></thead><tbody>';
+            foreach ($archived as $key=>$meta) {
+                if (!is_array($meta)) $meta=[];
+                echo '<tr><td>'.esc_html($meta['site']??'Unknown').'</td><td>'.esc_html(($meta['type']??'').' / '.($meta['name']??($meta['slug']??'Unknown'))).'</td><td>'.esc_html($meta['version']??'').'</td><td>'.esc_html($meta['title']??'Not in current results').'</td><td>';
+                self::action_form($key,'restore','Unignore');
+                echo '</td></tr>';
+            }
+            echo '</tbody></table>';
+        }
         echo '<p><em>Kein Treffer bedeutet nur: In dieser Feed-Version wurde keine passende bekannte Schwachstelle erkannt. Das ist keine Sicherheitsgarantie.</em></p></div>';
     }
     private static function table($rows, $restore=false) {
