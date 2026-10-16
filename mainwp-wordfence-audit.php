@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MainWP Wordfence Audit
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
- * Version: 0.3.1
+ * Version: 0.3.2
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -386,14 +386,59 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.3.1</small></h1>';
-        echo '<p>Nur lesender Abgleich des zuletzt von MainWP synchronisierten Inventars mit Wordfence Intelligence. Keine Updates auf Kundenseiten.</p>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.3.2</small></h1>';
+        echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
         $key_present=(bool)get_option(self::OPT_KEY,'');
         $last_error=(string)get_option(self::ERROR_OPTION,'');
-        echo '<p><strong>Wordfence API key:</strong> '.($key_present?'Configured (not validated)':'Not configured').'</p>';
-        echo '<p><strong>Next feed request:</strong> '.($cooldown ? esc_html(wp_date('Y-m-d H:i:s T',$next)).' ('.esc_html(human_time_diff(time(),$next)).' remaining)' : 'Available now').'</p>';
+        $tab=isset($_GET['mwa_tab']) && is_string($_GET['mwa_tab']) && sanitize_key(wp_unslash($_GET['mwa_tab']))==='settings' ? 'settings' : 'overview';
+        $base=admin_url('tools.php?page=mwa-audit');
+        echo '<nav class="nav-tab-wrapper" aria-label="Audit navigation" style="margin:20px 0 16px">';
+        echo '<a class="nav-tab '.($tab==='overview'?'nav-tab-active':'').'" href="'.esc_url($base).'">Overview</a>';
+        echo '<a class="nav-tab '.($tab==='settings'?'nav-tab-active':'').'" href="'.esc_url(add_query_arg('mwa_tab','settings',$base)).'">Settings</a></nav>';
+        if ($tab==='settings') {
+            echo '<div class="card" style="max-width:760px;padding:18px 24px">';
+            echo '<h2>Wordfence Intelligence API</h2>';
+            echo '<p><strong>API key:</strong> '.($key_present?'Configured (not validated)':'Not configured').'</p>';
+            echo '<p class="description">Existing keys are never displayed. Leave the field empty to keep the current key.</p>';
+            echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_save_key">';
+            wp_nonce_field('mwa_save_key');
+            echo '<label for="mwa-key">Replace API key</label><br><input id="mwa-key" class="regular-text" type="password" name="api_key" autocomplete="new-password" placeholder="New API key"> ';
+            submit_button('Save API key','primary','submit',false);
+            echo '</form>';
+            echo '<p class="description">The standard API rate limit requires spacing requests. Feed refresh is available in Overview.</p></div>';
+            echo '</div>';
+            return;
+        }
+        echo '<div style="display:flex;flex-wrap:wrap;gap:12px;margin:18px 0">';
+        $cards=[
+            ['label'=>'Active vulnerabilities','value'=>(string)count($hits),'note'=>'Confirmed installed-version matches'],
+            ['label'=>'Needs review','value'=>(string)count($unknown),'note'=>'Uncertain version matches'],
+            ['label'=>'Inventory entries','value'=>(string)count($inventory),'note'=>'Last synced by MainWP'],
+            ['label'=>'Ignored findings','value'=>(string)count($ignored),'note'=>'Hidden but not fixed'],
+        ];
+        foreach ($cards as $card) {
+            echo '<div style="background:#fff;border:1px solid #c3c4c7;padding:15px 19px;min-width:160px;flex:1 1 160px;max-width:260px">';
+            echo '<div style="color:#50575e">'.esc_html($card['label']).'</div><div style="font-size:27px;font-weight:600;line-height:1.7">'.esc_html($card['value']).'</div><span class="description">'.esc_html($card['note']).'</span></div>';
+        }
+        echo '</div>';
+        echo '<div style="background:#fff;border:1px solid #c3c4c7;padding:16px 20px;margin:14px 0;max-width:1080px">';
+        echo '<h2 style="margin:0 0 12px">Data sources</h2>';
+        echo '<p><strong>MainWP inventory:</strong> '.esc_html((string)count($inventory)).' installed items in the locally synced inventory.</p>';
+        echo '<p><strong>Wordfence feed:</strong> '.($when?esc_html(wp_date('Y-m-d H:i:s T',$when)):'Not yet downloaded').'</p>';
+        echo '<p><strong>API key:</strong> '.($key_present?'Configured (not validated)':'Missing').' · <a href="'.esc_url(add_query_arg('mwa_tab','settings',$base)).'">API settings</a></p>';
+        echo '<p><strong>Next Wordfence request:</strong> '.($cooldown?esc_html(wp_date('Y-m-d H:i:s T',$next)).' ('.esc_html(human_time_diff(time(),$next)).' remaining)':'Available now').'</p>';
+        echo '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:14px">';
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="margin:0"><input type="hidden" name="action" value="mwa_inventory">';
+        wp_nonce_field('mwa_inventory');
+        submit_button('Recheck MainWP inventory','primary','submit',false);
+        echo '</form>';
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="margin:0"><input type="hidden" name="action" value="mwa_refresh">';
+        wp_nonce_field('mwa_refresh');
+        submit_button('Refresh Wordfence feed','secondary','submit',false,($cooldown || !$key_present)?['disabled'=>'disabled']:[]);
+        echo '</form></div>';
+        echo '<p class="description" style="margin-bottom:0">MainWP recheck uses locally synced inventory without API calls. Use MainWP Sync to retrieve fresh data from child sites. Wordfence refresh downloads the external feed and is rate-limited.</p></div>';
         if (isset($_GET['mwa_status'])) {
             $status=sanitize_key(wp_unslash($_GET['mwa_status']));
             $messages=[
@@ -413,18 +458,7 @@ final class MWA_Audit {
             elseif ($status==='api_error') echo '<p>No error details were saved by the previous plugin version. Wait until the cooldown ends before retrying.</p>';
         }
         if ($error) echo '<div class="notice notice-warning"><p>'.esc_html($error).'</p></div>';
-        echo '<p>Feed: '.($when?esc_html(wp_date('d.m.Y H:i:s',$when)):'noch nicht geladen').' | Inventareinträge: '.esc_html((string)count($inventory)).' | Treffer: '.esc_html((string)count($hits)).' | Unklare Zuordnungen: '.esc_html((string)count($unknown)).'</p>';
-        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_save_key">';
-        wp_nonce_field('mwa_save_key');echo '<label for="mwa-key">Wordfence v3 API-Key:</label> <input id="mwa-key" type="password" name="api_key" autocomplete="new-password" size="35" placeholder="Neuen Key eingeben (leer = unverändert)"> ';
-        submit_button('Key speichern','secondary','submit',false);echo '</form>';
-        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_refresh">';
-        wp_nonce_field('mwa_refresh');submit_button('Wordfence-Feed aktualisieren','primary','submit',false,($cooldown || !$key_present) ? ['disabled'=>'disabled'] : []);echo '</form>';
-        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_inventory">';
-        wp_nonce_field('mwa_inventory');
-        submit_button('Reload MainWP inventory (no Wordfence API)','secondary','submit',false);
-        echo '</form>';
-        echo '<p>To synchronise live plugin/theme versions on child sites, use the standard MainWP sync controls first.</p>';
-        if ($when && time()-$when>86400) echo '<p><strong>Hinweis:</strong> Der Feed ist älter als 24 Stunden.</p>';
+        if ($when && time()-$when>86400) echo '<p><strong>Warning:</strong> The vulnerability feed is more than 24 hours old.</p>';
         // GET filters affect presentation only; they never trigger API requests.
         $site_filter=isset($_GET['mwa_site']) && is_string($_GET['mwa_site']) ? sanitize_text_field(wp_unslash($_GET['mwa_site'])) : '';
         $severity_filter=isset($_GET['mwa_severity']) && is_string($_GET['mwa_severity']) ? sanitize_key(wp_unslash($_GET['mwa_severity'])) : 'all';
