@@ -2,7 +2,7 @@
 
 Experimental, read-only vulnerability scanner for a MainWP dashboard using the Wordfence Intelligence v3 scanner feed.
 
-> **Development status:** v0.2.1 is not yet production-ready or security-audited. Use a staging MainWP dashboard for initial tests. Do not publish the repository as a stable release yet.
+> **Development status:** v0.3.0 is not yet production-ready or security-audited. Use a staging MainWP dashboard for initial tests. Do not publish the repository as a stable release yet.
 
 ## Requirements
 
@@ -53,3 +53,14 @@ Wordfence Intelligence API: https://www.wordfence.com/help/wordfence-intelligenc
 The admin page shows whether an API key is configured (without displaying it) and the next locally permitted request time using the WordPress site's configured timezone. A configured key is **not** necessarily valid. A blank results table before the first successful feed retrieval is not a clean bill of health.
 
 When a previous plugin version returned only `api_error`, the original error details cannot be reconstructed. The dashboard explains this rather than reporting a misleading empty error; wait until the existing cooldown expires before requesting another feed.
+
+## Finding management (v0.3.0)
+
+- **Ignore** hides a specific site's individual vulnerability from the active results. Ignored findings remain accessible in an **Ignored findings** section and may be restored with **Unignore**. Ignored findings are not fixed vulnerabilities.
+- **Open MainWP** takes the administrator to MainWP's management area to review updates. It does not install or activate software.
+- **Reload MainWP inventory (no Wordfence API)** evaluates the latest locally saved MainWP site inventory and cached Wordfence index again. It does **not** ask child sites to synchronise. To fetch fresh versions from child sites, first run MainWP's regular sync.
+- **Severity** displays a Wordfence severity or CVSS score when it is present in the cached feed. Earlier cache indexes only stored the title, so their severity will remain **Unknown** until the next permitted feed refresh. Do not refresh early just to populate severity.
+
+Ignored findings are stored in a WordPress option and persist across feed reloads, including when their old finding no longer appears in current results.
+
+**Pending for public release:** add automated PHP lint/integration tests, refine MainWP deep-links, confirm actual Wordfence CVSS schema on a fresh feed, and secure the JSON cache against direct access on Nginx.
