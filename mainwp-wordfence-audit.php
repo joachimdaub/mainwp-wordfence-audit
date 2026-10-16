@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MainWP Wordfence Audit
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
- * Version: 0.2.1
+ * Version: 0.3.0
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -15,11 +15,14 @@ final class MWA_Audit {
     const ENDPOINT = 'https://www.wordfence.com/api/intelligence/v3/vulnerabilities/scanner';
     const ERROR_OPTION = 'mwa_last_feed_error';
     const NEXT_ATTEMPT = 'mwa_next_feed_attempt';
+    const IGNORED = 'mwa_ignored_findings_v1';
     const MIN_INTERVAL = 2700; // 45 minutes, above the default Wordfence limit.
     public static function init() {
         add_action('admin_menu', [__CLASS__, 'menu']);
         add_action('admin_post_mwa_save_key', [__CLASS__, 'save_key']);
         add_action('admin_post_mwa_refresh', [__CLASS__, 'refresh']);
+        add_action('admin_post_mwa_ignore', [__CLASS__, 'ignore_action']);
+        add_action('admin_post_mwa_inventory', [__CLASS__, 'inventory_refresh']);
     }
     private static function allowed() { return current_user_can('manage_options'); }
     public static function menu() {
@@ -36,6 +39,67 @@ final class MWA_Audit {
         if (strlen($key)>512 || preg_match('/[^a-zA-Z0-9_.\-]/', $key)) self::redirect('invalid_key');
         if ($key !== '') update_option(self::OPT_KEY, $key, false);
         self::redirect('saved');
+    }
+    // Reloads current MainWP inventory from the database; does not sync child sites or contact Wordfence.
+    public static function inventory_refresh() {
+        if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
+        check_admin_referer('mwa_inventory');
+        self::redirect('inventory_refreshed');
+    }
+    private static function finding_key($item, $v) {
+        return hash('sha256', $item['site'].'|'.$item['type'].'|'.$item['slug'].'|'.(string)$v['id']);
+    }
+    public static function ignore_action() {
+        if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
+        check_admin_referer('mwa_ignore');
+        $key = isset($_POST['finding_key']) && is_string($_POST['finding_key']) ? wp_unslash($_POST['finding_key']) : '';
+        $mode = isset($_POST['mode']) && is_string($_POST['mode']) ? sanitize_key(wp_unslash($_POST['mode'])) : '';
+        if (!preg_match('/^[a-f0-9]{64}$/D', $key) || !in_array($mode, ['ignore','restore'], true)) self::redirect('invalid_action');
+        $ignored = get_option(self::IGNORED, []);
+        if (!is_array($ignored)) $ignored = [];
+        if ($mode==='ignore') {
+            // Only accept keys that exist in the currently visible inventory/feed.
+            $valid = false;
+            list($inventory,) = self::inventory();
+            $index = self::cached_index();
+            foreach ($inventory as $item) {
+                foreach ($index[$item['type'].'/'.strtolower($item['slug'])]??[] as $v) {
+                    if (hash_equals(self::finding_key($item,$v), $key)) { $valid=true; break 2; }
+                }
+            }
+            if (!$valid) self::redirect('invalid_action');
+            $ignored[$key] = time();
+        } else {
+            unset($ignored[$key]);
+        }
+        update_option(self::IGNORED, $ignored, false);
+        self::redirect($mode==='ignore'?'ignored':'restored');
+    }
+    private static function severity($v) {
+        $row=$v['row']??[];
+        $raw=$row['severity']??null;
+        if (is_string($raw) && in_array(strtolower($raw),['critical','high','medium','low','informational'],true)) return ucfirst(strtolower($raw));
+        // Wordfence may supply CVSS v3 as a number or nested object.
+        $candidates=[$row['cvss']['score']??null,$row['cvss']['cvss3']['score']??null,$row['cvss3']['score']??null,$row['cvss_score']??null];
+        foreach ($candidates as $score) {
+            if (!is_numeric($score)) continue;
+            $score=(float)$score;
+            if ($score<0 || $score>10) continue;
+            if ($score>=9) return 'Critical ('.number_format($score,1).')';
+            if ($score>=7) return 'High ('.number_format($score,1).')';
+            if ($score>=4) return 'Medium ('.number_format($score,1).')';
+            return 'Low ('.number_format($score,1).')';
+        }
+        return 'Unknown';
+    }
+    private static function action_form($key,$mode,$label) {
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="display:inline">';
+        echo '<input type="hidden" name="action" value="mwa_ignore">';
+        echo '<input type="hidden" name="finding_key" value="'.esc_attr($key).'">';
+        echo '<input type="hidden" name="mode" value="'.esc_attr($mode).'">';
+        wp_nonce_field('mwa_ignore');
+        submit_button($label,'small','submit',false);
+        echo '</form>';
     }
     private static function feed_error($message) {
         update_option(self::ERROR_OPTION, sanitize_text_field($message), false);
@@ -182,7 +246,7 @@ final class MWA_Audit {
                         if (!is_array($sw)) continue;
                         $type=$sw['type']??''; $slug=$sw['slug']??'';
                         if (!is_string($type) || !is_string($slug) || !isset($wanted[$type.'/'.strtolower($slug)])) continue;
-                        $matches[$type.'/'.strtolower($slug)][]=['id'=>$key,'row'=>['title'=>(string)($row['title']??$key)],'software'=>$sw];
+                        $matches[$type.'/'.strtolower($slug)][]=['id'=>$key,'row'=>['title'=>(string)($row['title']??$key),'severity'=>$row['severity']??null,'cvss'=>$row['cvss']??null,'cvss3'=>$row['cvss3']??null,'cvss_score'=>$row['cvss_score']??null],'software'=>$sw];
                     }
                     $value=''; $state='separator';
                 }
@@ -279,15 +343,20 @@ final class MWA_Audit {
         $when=(int)get_option(self::LAST,0);
         list($inventory,$error)=self::inventory();
 
-        $hits=[];$unknown=[];
+        $hits=[];$unknown=[];$ignored_rows=[];
+        $ignored=get_option(self::IGNORED,[]);
+        if (!is_array($ignored)) $ignored=[];
         foreach ($inventory as $item) {
             foreach ($idx[$item['type'].'/'.strtolower($item['slug'])]??[] as $v) {
                 $status=self::range_status($item['version'],$v['software']['affected_versions']??null);
-                if ($status==='affected') $hits[]=[$item,$v];
-                elseif ($status==='unknown') $unknown[]=[$item,$v];
+                if ($status!=='affected' && $status!=='unknown') continue;
+                $pair=[$item,$v];
+                if (isset($ignored[self::finding_key($item,$v)])) $ignored_rows[]=$pair;
+                elseif ($status==='affected') $hits[]=$pair;
+                else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.2.1</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.3.0</small></h1>';
         echo '<p>Nur lesender Abgleich des zuletzt von MainWP synchronisierten Inventars mit Wordfence Intelligence. Keine Updates auf Kundenseiten.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -304,6 +373,10 @@ final class MWA_Audit {
                 'no_key'=>'Enter and save an API key before refreshing.',
                 'invalid_key'=>'The API key contains invalid characters.',
                 'api_error'=>'The last feed refresh failed.',
+                'inventory_refreshed'=>'MainWP inventory reloaded from the local dashboard database. No remote sync was triggered.',
+                'ignored'=>'Finding ignored.',
+                'restored'=>'Finding restored.',
+                'invalid_action'=>'Invalid finding action.',
             ];
             echo '<div class="notice '.($status==='api_error'?'notice-error':'notice-info').'"><p>'.esc_html($messages[$status]??'Request completed.').'</p></div>';
             if ($status==='api_error' && $last_error!=='') echo '<div class="notice notice-error"><p>'.esc_html($last_error).'</p></div>';
@@ -316,19 +389,30 @@ final class MWA_Audit {
         submit_button('Key speichern','secondary','submit',false);echo '</form>';
         echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_refresh">';
         wp_nonce_field('mwa_refresh');submit_button('Wordfence-Feed aktualisieren','primary','submit',false,($cooldown || !$key_present) ? ['disabled'=>'disabled'] : []);echo '</form>';
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_inventory">';
+        wp_nonce_field('mwa_inventory');
+        submit_button('Reload MainWP inventory (no Wordfence API)','secondary','submit',false);
+        echo '</form>';
+        echo '<p>To synchronise live plugin/theme versions on child sites, use the standard MainWP sync controls first.</p>';
         if ($when && time()-$when>86400) echo '<p><strong>Hinweis:</strong> Der Feed ist älter als 24 Stunden.</p>';
         echo '<h2>Bestätigte Treffer nach Versionsbereich</h2>';
         self::table($hits);
         echo '<h2>Unklar / manuell prüfen</h2><p>Unbekannte Versionsformate oder unvollständige Bereiche werden nicht als sicher eingestuft.</p>';
         self::table($unknown);
+        echo '<h2>Ignored findings ('.esc_html((string)count($ignored_rows)).')</h2>';
+        self::table($ignored_rows, true);
         echo '<p><em>Kein Treffer bedeutet nur: In dieser Feed-Version wurde keine passende bekannte Schwachstelle erkannt. Das ist keine Sicherheitsgarantie.</em></p></div>';
     }
-    private static function table($rows) {
-        echo '<table class="widefat striped"><thead><tr><th>Website</th><th>Typ / Plugin oder Theme</th><th>Version</th><th>Schwachstelle</th></tr></thead><tbody>';
-        if (!$rows) echo '<tr><td colspan="4">Keine Einträge</td></tr>';
+    private static function table($rows, $restore=false) {
+        echo '<table class="widefat striped"><thead><tr><th>Website</th><th>Type / Plugin or Theme</th><th>Version</th><th>Severity</th><th>Vulnerability</th><th>Actions</th></tr></thead><tbody>';
+        if (!$rows) echo '<tr><td colspan="6">No entries</td></tr>';
         foreach ($rows as $pair) {
             list($item,$v)=$pair;
-            echo '<tr><td>'.esc_html($item['site']).'</td><td>'.esc_html($item['type'].' / '.$item['name'].' ('.$item['slug'].')').'</td><td>'.esc_html($item['version']).'</td><td>'.esc_html($v['row']['title']??(string)$v['id']).'</td></tr>';
+            echo '<tr><td>'.esc_html($item['site']).'</td><td>'.esc_html($item['type'].' / '.$item['name'].' ('.$item['slug'].')').'</td><td>'.esc_html($item['version']).'</td><td>'.esc_html(self::severity($v)).'</td><td>'.esc_html($v['row']['title']??(string)$v['id']).'</td><td>';
+            self::action_form(self::finding_key($item,$v),$restore?'restore':'ignore',$restore?'Unignore':'Ignore');
+            // Navigate to MainWP for updates; never perform remote updates here.
+            echo ' <a class="button button-small" href="'.esc_url(admin_url('admin.php?page=managesites')).'">Open MainWP</a>';
+            echo '</td></tr>';
         }
         echo '</tbody></table>';
     }
