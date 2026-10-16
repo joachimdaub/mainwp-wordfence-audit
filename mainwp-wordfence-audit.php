@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MainWP Wordfence Audit
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
- * Version: 0.1.2
+ * Version: 0.2.0
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -10,6 +10,7 @@ if (!defined('ABSPATH')) exit;
 final class MWA_Audit {
     const OPT_KEY = 'mwa_wordfence_key';
     const CACHE = 'mwa_wordfence_feed_v1';
+    const INDEX_FILE = 'mainwp-wordfence-audit-index.json';
     const LAST = 'mwa_wordfence_feed_updated';
     const ENDPOINT = 'https://www.wordfence.com/api/intelligence/v3/vulnerabilities/scanner';
     const ERROR_OPTION = 'mwa_last_feed_error';
@@ -49,12 +50,20 @@ final class MWA_Audit {
         if (time() < $next) self::redirect('throttled');
         update_option(self::NEXT_ATTEMPT, time() + self::MIN_INTERVAL, false);
         update_option('mwa_last_attempt', time(), false);
+        // Stream directly to disk; WordPress must never buffer the full feed.
+        $dir = self::storage_dir();
+        if (is_wp_error($dir)) self::feed_error('Cache directory unavailable: '.$dir->get_error_code());
+        $tmp = wp_tempnam('mwa-wordfence-feed.json');
+        if (!$tmp) self::feed_error('Could not create temporary download file.');
         $res = wp_remote_get(self::ENDPOINT, [
-            'timeout'=>60, 'redirection'=>0,
+            'timeout'=>180, 'redirection'=>0,
             'headers'=>['Authorization'=>'Bearer '.$key,'Accept'=>'application/json'],
-            'limit_response_size'=>35000000,
+            'stream'=>true, 'filename'=>$tmp,
         ]);
-        if (is_wp_error($res)) self::feed_error('WordPress HTTP-Fehler: '.$res->get_error_code());
+        if (is_wp_error($res)) {
+            @unlink($tmp);
+            self::feed_error('WordPress HTTP error: '.$res->get_error_code());
+        }
         $http_code = (int) wp_remote_retrieve_response_code($res);
         if ($http_code === 429) {
             $retry = wp_remote_retrieve_header($res, 'retry-after');
@@ -62,28 +71,142 @@ final class MWA_Audit {
             update_option(self::NEXT_ATTEMPT, time() + max(3600,$seconds), false);
         }
         if ($http_code !== 200) {
-            $hints = [
-                400=>'Ungültige Anfrage.',
-                401=>'API-Key nicht akzeptiert.',
-                403=>'Zugriff verweigert.',
-                404=>'API-Endpunkt nicht gefunden.',
-                429=>'Rate-Limit erreicht. Bitte später erneut versuchen.',
-                500=>'Wordfence-Serverfehler.',
-                502=>'Wordfence-Gateway-Fehler.',
-                503=>'Wordfence vorübergehend nicht verfügbar.',
-            ];
-            self::feed_error('Wordfence HTTP '.$http_code.': '.($hints[$http_code]??'Unerwartete HTTP-Antwort.'));
+            @unlink($tmp);
+            self::feed_error('Wordfence HTTP '.$http_code.($http_code===429?' (rate limit reached)':''));
         }
-        $body = wp_remote_retrieve_body($res);
-        $data = json_decode($body,true);
-        if (!is_array($data) || json_last_error() !== JSON_ERROR_NONE || !$data || strlen($body)>=35000000) {
-            self::feed_error('Antwort HTTP 200, aber JSON ungültig, leer oder Größenlimit (35 MB) erreicht; Bytes: '.strlen($body).'; JSON-Fehler: '.json_last_error_msg());
+        // Extract only the installed software's vulnerabilities, not the entire feed.
+        list($inventory,) = self::inventory();
+        $wanted = [];
+        foreach ($inventory as $item) $wanted[$item['type'].'/'.strtolower($item['slug'])] = true;
+        $index = self::stream_index($tmp, $wanted);
+        @unlink($tmp);
+        if (is_wp_error($index)) self::feed_error('Feed validation failed: '.$index->get_error_code());
+        if (!$index['seen']) self::feed_error('The feed contained no vulnerability entries.');
+        $json = wp_json_encode($index['matches']);
+        if (!is_string($json)) self::feed_error('Could not encode vulnerability index.');
+        $target = trailingslashit($dir).self::INDEX_FILE;
+        $stage = $target.'.tmp-'.wp_generate_password(12,false,false);
+        if (file_put_contents($stage,$json,LOCK_EX)===false || !@rename($stage,$target)) {
+            @unlink($stage);
+            self::feed_error('Could not save vulnerability index.');
         }
+        @chmod($target,0600);
         delete_option(self::ERROR_OPTION);
-        // Store only vulnerability data, never user credentials, under private WordPress options.
-        update_option(self::CACHE, $data, false);
+        delete_option(self::CACHE); // Remove legacy oversized option.
         update_option(self::LAST, time(), false);
         self::redirect('updated');
+    }
+    private static function storage_dir() {
+        $uploads = wp_get_upload_dir();
+        if (!empty($uploads['error']) || empty($uploads['basedir'])) return new WP_Error('uploads_unavailable');
+        $dir = trailingslashit($uploads['basedir']).'mainwp-wordfence-audit';
+        if (!is_dir($dir) && !wp_mkdir_p($dir)) return new WP_Error('mkdir_failed');
+        if (!is_writable($dir)) return new WP_Error('directory_not_writable');
+        // Prevent direct HTTP access on Apache; never store secrets in this directory.
+        if (!file_exists($dir.'/index.php')) @file_put_contents($dir.'/index.php', '<?php // Silence is golden.');
+        if (!file_exists($dir.'/.htaccess')) @file_put_contents($dir.'/.htaccess', "Require all denied\nDeny from all\n");
+        return $dir;
+    }
+    /**
+     * Iterate a top-level JSON object without loading it all into memory.
+     * JSON values are individually decoded and discarded unless they match
+     * an installed plugin or theme. Reject incomplete/invalid JSON.
+     */
+    private static function stream_index($path, $wanted) {
+        $fp = @fopen($path,'rb');
+        if (!$fp) return new WP_Error('file_open_failed');
+        $matches=[]; $seen=0; $state='start'; $key=''; $value='';
+        $token=''; $in_string=false; $escaped=false; $depth=0;
+        $error=null;
+        // Buffered single-character reader: memory stays bounded.
+        $buffer=''; $position=0; $length=0;
+        while (true) {
+            if ($position >= $length) {
+                $buffer=fread($fp,65536);
+                if ($buffer===false) { $error='read_failed'; break; }
+                $length=strlen($buffer); $position=0;
+                if (!$length) break;
+            }
+            $ch=$buffer[$position++];
+            if ($state==='done') { if (!ctype_space($ch)) { $error='trailing_data'; break; } continue; }
+            if ($state==='start') {
+                if (ctype_space($ch)) continue;
+                if ($ch!=='{') { $error='root_not_object'; break; }
+                $state='key_or_end'; continue;
+            }
+            if ($state==='key_or_end') {
+                if (ctype_space($ch)) continue;
+                if ($ch==='}') { $state='done'; continue; }
+                if ($ch!=='"') { $error='invalid_key'; break; }
+                $token='"'; $in_string=true; $escaped=false; $state='key'; continue;
+            }
+            if ($state==='key') {
+                $token.=$ch;
+                if ($escaped) { $escaped=false; continue; }
+                if ($ch==='\\') { $escaped=true; continue; }
+                if ($ch==='"') {
+                    $key=json_decode($token,true);
+                    if (!is_string($key)) { $error='invalid_key_json'; break; }
+                    $state='colon'; $token='';
+                }
+                if (strlen($token)>10240) { $error='key_too_large'; break; }
+                continue;
+            }
+            if ($state==='colon') {
+                if (ctype_space($ch)) continue;
+                if ($ch!==':') { $error='missing_colon'; break; }
+                $state='value_start'; continue;
+            }
+            if ($state==='value_start') {
+                if (ctype_space($ch)) continue;
+                if ($ch!=='{') { $error='invalid_entry'; break; }
+                $value='{'; $depth=1; $in_string=false; $escaped=false; $state='value'; continue;
+            }
+            if ($state==='value') {
+                $value.=$ch;
+                if ($in_string) {
+                    if ($escaped) $escaped=false;
+                    elseif ($ch==='\\') $escaped=true;
+                    elseif ($ch==='"') $in_string=false;
+                } else {
+                    if ($ch==='"') $in_string=true;
+                    elseif ($ch==='{' || $ch==='[') $depth++;
+                    elseif ($ch==='}' || $ch===']') $depth--;
+                }
+                if ($depth<0 || strlen($value)>8388608) { $error='entry_too_large'; break; }
+                if ($depth===0) {
+                    $row=json_decode($value,true);
+                    if (!is_array($row) || json_last_error()!==JSON_ERROR_NONE) { $error='invalid_entry_json'; break; }
+                    $seen++;
+                    foreach ($row['software']??[] as $sw) {
+                        if (!is_array($sw)) continue;
+                        $type=$sw['type']??''; $slug=$sw['slug']??'';
+                        if (!is_string($type) || !is_string($slug) || !isset($wanted[$type.'/'.strtolower($slug)])) continue;
+                        $matches[$type.'/'.strtolower($slug)][]=['id'=>$key,'row'=>['title'=>(string)($row['title']??$key)],'software'=>$sw];
+                    }
+                    $value=''; $state='separator';
+                }
+                continue;
+            }
+            if ($state==='separator') {
+                if (ctype_space($ch)) continue;
+                if ($ch===',') { $state='key_or_end'; continue; }
+                if ($ch==='}') { $state='done'; continue; }
+                $error='invalid_separator'; break;
+            }
+        }
+        fclose($fp);
+        if ($error || $state!=='done') return new WP_Error($error?:'incomplete_json');
+        return ['seen'=>$seen,'matches'=>$matches];
+    }
+    private static function cached_index() {
+        $uploads=wp_get_upload_dir();
+        if (!empty($uploads['error']) || empty($uploads['basedir'])) return [];
+        $path=trailingslashit($uploads['basedir']).'mainwp-wordfence-audit/'.self::INDEX_FILE;
+        if (!is_readable($path)) return [];
+        $raw=@file_get_contents($path);
+        $decoded=is_string($raw)?json_decode($raw,true):null;
+        return is_array($decoded)?$decoded:[];
     }
     private static function range_status($version, $ranges) {
         if (!is_array($ranges) || !$ranges || !is_string($version) || !preg_match('/^\d+(?:\.\d+)*(?:[-.]?(?:alpha|beta|rc)\d*)?$/i',$version)) return 'unknown';
@@ -152,10 +275,10 @@ final class MWA_Audit {
     }
     public static function page() {
         if (!self::allowed()) wp_die('Forbidden','',['response'=>403]);
-        $feed=get_option(self::CACHE,[]);
+        $idx=self::cached_index();
         $when=(int)get_option(self::LAST,0);
         list($inventory,$error)=self::inventory();
-        $idx=is_array($feed)?self::index_feed($feed):[];
+
         $hits=[];$unknown=[];
         foreach ($inventory as $item) {
             foreach ($idx[$item['type'].'/'.strtolower($item['slug'])]??[] as $v) {
@@ -164,7 +287,7 @@ final class MWA_Audit {
                 elseif ($status==='unknown') $unknown[]=[$item,$v];
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.1.2</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.2.0</small></h1>';
         echo '<p>Nur lesender Abgleich des zuletzt von MainWP synchronisierten Inventars mit Wordfence Intelligence. Keine Updates auf Kundenseiten.</p>';
         if (isset($_GET['mwa_status'])) {
             $status=sanitize_key(wp_unslash($_GET['mwa_status']));
