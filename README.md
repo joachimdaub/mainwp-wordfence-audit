@@ -2,7 +2,7 @@
 
 Experimental, read-only vulnerability scanner for a MainWP dashboard using the Wordfence Intelligence v3 scanner feed.
 
-> **Development status:** v0.3.2 is not yet production-ready or security-audited. Use a staging MainWP dashboard for initial tests. Do not publish the repository as a stable release yet.
+> **Development status:** v0.3.3 is not yet production-ready or security-audited. Use a staging MainWP dashboard for initial tests. Do not publish the repository as a stable release yet.
 
 ## Requirements
 
@@ -65,13 +65,13 @@ Ignored findings are stored in a WordPress option and persist across feed reload
 
 **Pending for public release:** add automated PHP lint/integration tests, refine MainWP deep-links, confirm actual Wordfence CVSS schema on a fresh feed, and secure the JSON cache against direct access on Nginx.
 
-## Finding filters (v0.3.2)
+## Finding filters (v0.3.3)
 
 Use the dashboard's **Website** and **Severity** dropdowns to narrow active and currently ignored findings. **Sort** orders severity from highest to lowest by default (or the reverse). Unknown severity is kept visible in the default view and can be filtered explicitly. The controls only reload the admin page; they never request the Wordfence feed or update a managed site. **Reset** returns to all websites and severities.
 
 The summary counters above the filters show the unfiltered current inventory. The separate **Visible findings** count reflects the filtered active results. Archived ignored findings are listed separately so they can always be restored.
 
-## Dashboard layout (v0.3.2)
+## Dashboard layout (v0.3.3)
 
 The **Overview** tab displays compact counters for confirmed vulnerabilities, uncertain findings, synced inventory items, and ignored entries. The **Data sources** panel separates actions clearly:
 
@@ -81,3 +81,11 @@ The **Overview** tab displays compact counters for confirmed vulnerabilities, un
 The **Settings** tab contains API key configuration. A configured key is not necessarily valid; the existing key is never displayed and a blank replacement field preserves it. Status times follow the WordPress site timezone.
 
 The interface still needs visual verification on a real MainWP installation, including narrow desktop/mobile widths. No automatic site update operation has been added.
+
+## Severity enrichment (v0.3.3)
+
+Wordfence's **scanner feed does not include CVSS ratings**. After the scanner feed has been downloaded, the Overview offers **Load severity ratings**, which independently downloads the Wordfence **production feed** and joins detailed CVSS data to cached scanner findings by vulnerability UUID. Both endpoints share the same 45-minute cooldown and HTTP 429 handling. This second request must never be made during the cooldown.
+
+Scanner-only findings remain available even if they have no production details. Such entries display **Not rated** instead of suggesting that they have a confirmed low severity. Existing detection matches are not modified by enrichment. Refreshing the scanner feed will currently replace enriched ratings; use the production action again after the next eligible cooldown if needed.
+
+**Important:** This is experimental. Confirm the real production feed response and PHP memory footprint on a test dashboard before treating these ratings as verified. Do not use the separate production endpoint simply to work around API limits.
