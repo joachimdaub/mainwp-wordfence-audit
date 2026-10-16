@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MainWP Wordfence Audit
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
- * Version: 0.3.0
+ * Version: 0.3.1
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -337,6 +337,36 @@ final class MWA_Audit {
         }
         return $idx;
     }
+    private static function severity_rank($v) {
+        $severity=self::severity($v);
+        if (strpos($severity,'Critical')===0) return 5;
+        if (strpos($severity,'High')===0) return 4;
+        if (strpos($severity,'Medium')===0) return 3;
+        if (strpos($severity,'Low')===0) return 2;
+        if (strpos($severity,'Informational')===0) return 1;
+        return 0;
+    }
+    private static function sort_findings(&$rows, $order) {
+        usort($rows, static function($a,$b) use ($order) {
+            $a_rank=self::severity_rank($a[1]);
+            $b_rank=self::severity_rank($b[1]);
+            if ($a_rank!==$b_rank) return $order==='severity_asc' ? ($a_rank<=>$b_rank) : ($b_rank<=>$a_rank);
+            $site=strcmp($a[0]['site'],$b[0]['site']);
+            if ($site!==0) return $site;
+            return strcmp((string)$a[1]['id'],(string)$b[1]['id']);
+        });
+    }
+    private static function filter_findings($rows, $site, $severity) {
+        return array_values(array_filter($rows, static function($pair) use ($site,$severity) {
+            if ($site!=='' && $pair[0]['site']!==$site) return false;
+            if ($severity!=='all') {
+                $value=self::severity($pair[1]);
+                if ($severity==='unknown') return $value==='Unknown';
+                if (strtolower(strtok($value,' '))!==$severity) return false;
+            }
+            return true;
+        }));
+    }
     public static function page() {
         if (!self::allowed()) wp_die('Forbidden','',['response'=>403]);
         $idx=self::cached_index();
@@ -356,7 +386,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.3.0</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.3.1</small></h1>';
         echo '<p>Nur lesender Abgleich des zuletzt von MainWP synchronisierten Inventars mit Wordfence Intelligence. Keine Updates auf Kundenseiten.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -395,6 +425,34 @@ final class MWA_Audit {
         echo '</form>';
         echo '<p>To synchronise live plugin/theme versions on child sites, use the standard MainWP sync controls first.</p>';
         if ($when && time()-$when>86400) echo '<p><strong>Hinweis:</strong> Der Feed ist älter als 24 Stunden.</p>';
+        // GET filters affect presentation only; they never trigger API requests.
+        $site_filter=isset($_GET['mwa_site']) && is_string($_GET['mwa_site']) ? sanitize_text_field(wp_unslash($_GET['mwa_site'])) : '';
+        $severity_filter=isset($_GET['mwa_severity']) && is_string($_GET['mwa_severity']) ? sanitize_key(wp_unslash($_GET['mwa_severity'])) : 'all';
+        if (!in_array($severity_filter,['all','critical','high','medium','low','informational','unknown'],true)) $severity_filter='all';
+        $sort=isset($_GET['mwa_sort']) && is_string($_GET['mwa_sort']) ? sanitize_key(wp_unslash($_GET['mwa_sort'])) : 'severity_desc';
+        if (!in_array($sort,['severity_desc','severity_asc'],true)) $sort='severity_desc';
+        $sites=[];
+        foreach (array_merge($hits,$unknown,$ignored_rows) as $pair) $sites[$pair[0]['site']]=true;
+        $sites=array_keys($sites);
+        sort($sites,SORT_STRING);
+        echo '<form method="get" action="'.esc_url(admin_url('tools.php')).'" style="margin:16px 0">';
+        echo '<input type="hidden" name="page" value="mwa-audit">';
+        echo '<label for="mwa-site">Website: </label><select name="mwa_site" id="mwa-site"><option value="">All websites</option>';
+        foreach ($sites as $site) echo '<option value="'.esc_attr($site).'" '.selected($site_filter,$site,false).'>'.esc_html($site).'</option>';
+        echo '</select> <label for="mwa-severity">Severity: </label><select name="mwa_severity" id="mwa-severity">';
+        foreach (['all'=>'All','critical'=>'Critical','high'=>'High','medium'=>'Medium','low'=>'Low','informational'=>'Informational','unknown'=>'Unknown'] as $value=>$label) echo '<option value="'.esc_attr($value).'" '.selected($severity_filter,$value,false).'>'.esc_html($label).'</option>';
+        echo '</select> <label for="mwa-sort">Sort: </label><select name="mwa_sort" id="mwa-sort">';
+        foreach (['severity_desc'=>'Highest severity first','severity_asc'=>'Lowest severity first'] as $value=>$label) echo '<option value="'.esc_attr($value).'" '.selected($sort,$value,false).'>'.esc_html($label).'</option>';
+        echo '</select> ';
+        submit_button('Apply filters','secondary','submit',false);
+        echo ' <a href="'.esc_url(admin_url('tools.php?page=mwa-audit')).'">Reset</a></form>';
+        $hits=self::filter_findings($hits,$site_filter,$severity_filter);
+        $unknown=self::filter_findings($unknown,$site_filter,$severity_filter);
+        $ignored_rows=self::filter_findings($ignored_rows,$site_filter,$severity_filter);
+        self::sort_findings($hits,$sort);
+        self::sort_findings($unknown,$sort);
+        self::sort_findings($ignored_rows,$sort);
+        echo '<p><strong>Visible findings:</strong> '.esc_html((string)(count($hits)+count($unknown))).' (filtered view)</p>';
         echo '<h2>Bestätigte Treffer nach Versionsbereich</h2>';
         self::table($hits);
         echo '<h2>Unklar / manuell prüfen</h2><p>Unbekannte Versionsformate oder unvollständige Bereiche werden nicht als sicher eingestuft.</p>';
