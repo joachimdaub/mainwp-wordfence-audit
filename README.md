@@ -1,17 +1,49 @@
-# MainWP Wordfence Audit — MVP 0.1.2
+# MainWP Wordfence Audit
 
-Install the ZIP as a normal WordPress plugin **only on the MainWP dashboard**. Open Tools → MainWP Security Audit. Obtain a Wordfence Intelligence v3 API key, save it, then refresh the scanner feed. Sync MainWP child sites separately first.
+Experimental, read-only vulnerability scanner for a MainWP dashboard using the Wordfence Intelligence v3 scanner feed.
 
-Read-only; no changes to child sites. Admin-only capability `manage_options`, POST nonces, escaped output, fixed HTTPS Wordfence endpoint, request throttling. No third-party libraries. Does not disclose credentials in UI.
+> **Development status:** v0.2.0 is not yet production-ready or security-audited. Use a staging MainWP dashboard for initial tests. Do not publish the repository as a stable release yet.
 
-Limitations: MainWP site inventory compatibility needs testing against your installed MainWP version; blank inventory can mean a compatibility issue. Only recognizes unambiguous plugin directory slugs and theme slugs. Does not support complex/nonnumeric version formats; these should be investigated, not treated as safe. No WordPress Core matching, no scheduled refresh, no notifications. MainWP data can be stale. v0.1.2 is an untested MVP, not a security-audited production release.
+## Requirements
 
-Wordfence reference: https://www.wordfence.com/help/wordfence-intelligence/v3-accessing-and-consuming-the-vulnerability-data-feed/
+- WordPress with MainWP Dashboard
+- PHP 7.4 or later
+- A Wordfence Intelligence v3 API key
+- Enough free disk space for the full scanner feed and a writable WordPress uploads directory
 
-## API rate limits and current limitations
+## Installation and use
 
-The free Wordfence Intelligence API key is generally limited to one request per 30 minutes. This release enforces a 45-minute minimum between manual attempts, including failures, and at least 60 minutes after HTTP 429 (or longer when Retry-After requests it). It displays a diagnostic HTTP status without revealing the API key.
+1. Install the plugin on the **MainWP dashboard only**, not on managed child sites.
+2. Sync all managed sites in MainWP so their plugin/theme inventory is current.
+3. In **Tools → MainWP Security Audit**, save your Wordfence v3 API key.
+4. Refresh the vulnerability feed (respect the API's rate limits).
+5. Inspect confirmed matches and entries requiring manual review.
 
-**Known blocker:** The current feed download is capped at 35 MB, while the scanner feed may be substantially larger. A valid API response may therefore be rejected as truncated JSON. Do not repeatedly retry if this happens; the next version needs streaming storage and processing. Previous successful data is preserved on errors.
+This plugin never installs, updates, or modifies software on managed sites. It reads only the MainWP inventory currently available to the logged-in administrator.
 
-The cooldown is scoped to this WordPress installation, not the entire Wordfence account/key across multiple installations.
+## How the feed works
+
+The scanner feed is downloaded directly into a temporary file via the WordPress HTTP API (not into a PHP string). A bounded-memory parser processes one top-level vulnerability record at a time and keeps only records matching installed plugin or theme slugs.
+
+The resulting small index is written to `wp-content/uploads/mainwp-wordfence-audit/mainwp-wordfence-audit-index.json` and replaces the previous index only after successful processing. The temporary full feed is deleted. Previous successfully cached results are retained after a failed refresh.
+
+**Important:** The index does not include API credentials, but the cache directory lives beneath uploads. Apache access rules and an `index.php` file are created as a best-effort measure; server administrators must ensure this cache is not served publicly, particularly with Nginx.
+
+## API rate limiting
+
+A minimum 45-minute cooldown is enforced on this installation, including failed requests. HTTP 429 enforces at least 60 minutes (or longer if indicated by `Retry-After`). The cooldown is not coordinated with other installations that share the same Wordfence API key. Avoid requesting another feed until an existing externally imposed rate limit has expired.
+
+## Security and limitations
+
+- Requires the WordPress `manage_options` capability for the admin page and submissions.
+- Uses POST nonces, output escaping, a fixed HTTPS API endpoint, and no external PHP libraries.
+- Does not match WordPress Core vulnerabilities.
+- Unknown/unusual version formats need manual review.
+- MainWP inventory completeness and schema compatibility still require integration testing.
+- Only known vulnerabilities present in Wordfence data can be detected; a clean result does not prove a site is secure.
+- No cron, notifications, or historical reporting.
+- Feed download and validation have **not yet been tested against a real large Wordfence response**; test carefully before relying on scan results.
+
+## Documentation
+
+Wordfence Intelligence API: https://www.wordfence.com/help/wordfence-intelligence/v3-accessing-and-consuming-the-vulnerability-data-feed/
