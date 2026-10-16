@@ -2,7 +2,7 @@
 
 Experimental, read-only vulnerability scanner for a MainWP dashboard using the Wordfence Intelligence v3 scanner feed.
 
-> **Development status:** v0.2.0 is not yet production-ready or security-audited. Use a staging MainWP dashboard for initial tests. Do not publish the repository as a stable release yet.
+> **Development status:** v0.2.1 is not yet production-ready or security-audited. Use a staging MainWP dashboard for initial tests. Do not publish the repository as a stable release yet.
 
 ## Requirements
 
@@ -47,3 +47,9 @@ A minimum 45-minute cooldown is enforced on this installation, including failed 
 ## Documentation
 
 Wordfence Intelligence API: https://www.wordfence.com/help/wordfence-intelligence/v3-accessing-and-consuming-the-vulnerability-data-feed/
+
+## Dashboard status
+
+The admin page shows whether an API key is configured (without displaying it) and the next locally permitted request time using the WordPress site's configured timezone. A configured key is **not** necessarily valid. A blank results table before the first successful feed retrieval is not a clean bill of health.
+
+When a previous plugin version returned only `api_error`, the original error details cannot be reconstructed. The dashboard explains this rather than reporting a misleading empty error; wait until the existing cooldown expires before requesting another feed.
