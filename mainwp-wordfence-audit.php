@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MainWP Wordfence Audit
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
- * Version: 0.2.0
+ * Version: 0.2.1
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -287,22 +287,35 @@ final class MWA_Audit {
                 elseif ($status==='unknown') $unknown[]=[$item,$v];
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.2.0</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.2.1</small></h1>';
         echo '<p>Nur lesender Abgleich des zuletzt von MainWP synchronisierten Inventars mit Wordfence Intelligence. Keine Updates auf Kundenseiten.</p>';
+        $next=(int)get_option(self::NEXT_ATTEMPT,0);
+        $cooldown=time()<$next;
+        $key_present=(bool)get_option(self::OPT_KEY,'');
+        $last_error=(string)get_option(self::ERROR_OPTION,'');
+        echo '<p><strong>Wordfence API key:</strong> '.($key_present?'Configured (not validated)':'Not configured').'</p>';
+        echo '<p><strong>Next feed request:</strong> '.($cooldown ? esc_html(wp_date('Y-m-d H:i:s T',$next)).' ('.esc_html(human_time_diff(time(),$next)).' remaining)' : 'Available now').'</p>';
         if (isset($_GET['mwa_status'])) {
             $status=sanitize_key(wp_unslash($_GET['mwa_status']));
-            echo '<div class="notice '.($status==='api_error'?'notice-error':'notice-info').'"><p>'.esc_html($status).'</p></div>';
-            if ($status==='api_error') echo '<div class="notice notice-error"><p>'.esc_html((string)get_option(self::ERROR_OPTION, 'Keine Details verfügbar.')).'</p></div>';
+            $messages=[
+                'saved'=>'API key saved. Validity is checked on the next API request.',
+                'updated'=>'Wordfence feed refreshed.',
+                'throttled'=>'Request blocked by the local rate-limit cooldown. No API request was made.',
+                'no_key'=>'Enter and save an API key before refreshing.',
+                'invalid_key'=>'The API key contains invalid characters.',
+                'api_error'=>'The last feed refresh failed.',
+            ];
+            echo '<div class="notice '.($status==='api_error'?'notice-error':'notice-info').'"><p>'.esc_html($messages[$status]??'Request completed.').'</p></div>';
+            if ($status==='api_error' && $last_error!=='') echo '<div class="notice notice-error"><p>'.esc_html($last_error).'</p></div>';
+            elseif ($status==='api_error') echo '<p>No error details were saved by the previous plugin version. Wait until the cooldown ends before retrying.</p>';
         }
         if ($error) echo '<div class="notice notice-warning"><p>'.esc_html($error).'</p></div>';
         echo '<p>Feed: '.($when?esc_html(wp_date('d.m.Y H:i:s',$when)):'noch nicht geladen').' | Inventareinträge: '.esc_html((string)count($inventory)).' | Treffer: '.esc_html((string)count($hits)).' | Unklare Zuordnungen: '.esc_html((string)count($unknown)).'</p>';
         echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_save_key">';
         wp_nonce_field('mwa_save_key');echo '<label for="mwa-key">Wordfence v3 API-Key:</label> <input id="mwa-key" type="password" name="api_key" autocomplete="new-password" size="35" placeholder="Neuen Key eingeben (leer = unverändert)"> ';
         submit_button('Key speichern','secondary','submit',false);echo '</form>';
-        $next=(int)get_option(self::NEXT_ATTEMPT,0);
-        if (time()<$next) echo '<p><strong>Wordfence-Sperrfrist:</strong> Nächster Abruf frühestens '.esc_html(wp_date('d.m.Y H:i:s',$next)).'.</p>';
         echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_refresh">';
-        wp_nonce_field('mwa_refresh');submit_button('Wordfence-Feed aktualisieren','primary','submit',false,['disabled'=>time()<$next]);echo '</form>';
+        wp_nonce_field('mwa_refresh');submit_button('Wordfence-Feed aktualisieren','primary','submit',false,['disabled'=>$cooldown || !$key_present]);echo '</form>';
         if ($when && time()-$when>86400) echo '<p><strong>Hinweis:</strong> Der Feed ist älter als 24 Stunden.</p>';
         echo '<h2>Bestätigte Treffer nach Versionsbereich</h2>';
         self::table($hits);
