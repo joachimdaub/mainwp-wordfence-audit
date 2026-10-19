@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MainWP Wordfence Audit
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
- * Version: 0.3.3
+ * Version: 0.4.0
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -18,8 +18,14 @@ final class MWA_Audit {
     const ERROR_OPTION = 'mwa_last_feed_error';
     const NEXT_ATTEMPT = 'mwa_next_feed_attempt';
     const IGNORED = 'mwa_ignored_findings_v1';
+    private static $cron_context = false;
+    const CRON_SCANNER = 'mwa_daily_scanner_refresh';
+    const CRON_SEVERITY = 'mwa_daily_severity_refresh';
     const MIN_INTERVAL = 2700; // 45 minutes, above the default Wordfence limit.
     public static function init() {
+        add_action('init', [__CLASS__, 'ensure_schedule']);
+        add_action(self::CRON_SCANNER, [__CLASS__, 'cron_scanner']);
+        add_action(self::CRON_SEVERITY, [__CLASS__, 'cron_severity']);
         add_action('admin_menu', [__CLASS__, 'menu']);
         add_action('admin_post_mwa_save_key', [__CLASS__, 'save_key']);
         add_action('admin_post_mwa_refresh', [__CLASS__, 'refresh']);
@@ -27,11 +33,39 @@ final class MWA_Audit {
         add_action('admin_post_mwa_ignore', [__CLASS__, 'ignore_action']);
         add_action('admin_post_mwa_inventory', [__CLASS__, 'inventory_refresh']);
     }
+    public static function ensure_schedule() {
+        if (!wp_next_scheduled(self::CRON_SCANNER)) wp_schedule_event(time()+300, 'daily', self::CRON_SCANNER);
+        if (!wp_next_scheduled(self::CRON_SEVERITY)) wp_schedule_event(time()+3900, 'daily', self::CRON_SEVERITY);
+    }
+    public static function deactivate() {
+        wp_clear_scheduled_hook(self::CRON_SCANNER);
+        wp_clear_scheduled_hook(self::CRON_SEVERITY);
+    }
+    public static function cron_scanner() { self::cron_run('scanner'); }
+    public static function cron_severity() { self::cron_run('severity'); }
+    private static function cron_run($type) {
+        if (!get_option(self::OPT_KEY, '')) return;
+        self::$cron_context=true;
+        $status='unknown';
+        try {
+            if ($type==='scanner') self::refresh(true);
+            else self::enrich_severity(true);
+        } catch (RuntimeException $e) {
+            $status=$e->getMessage();
+        } catch (Throwable $e) {
+            $status='unexpected_error';
+            update_option(self::ERROR_OPTION, 'Cron task failed: '.get_class($e), false);
+        } finally {
+            self::$cron_context=false;
+            update_option('mwa_cron_'.$type.'_result', ['time'=>time(),'status'=>$status], false);
+        }
+    }
     private static function allowed() { return current_user_can('manage_options'); }
     public static function menu() {
         add_management_page('MainWP Security Audit', 'MainWP Security Audit', 'manage_options', 'mwa-audit', [__CLASS__, 'page']);
     }
     private static function redirect($status) {
+        if (self::$cron_context) throw new RuntimeException($status);
         wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_status'=>$status], admin_url('tools.php')));
         exit;
     }
@@ -108,9 +142,11 @@ final class MWA_Audit {
         update_option(self::ERROR_OPTION, sanitize_text_field($message), false);
         self::redirect('api_error');
     }
-    public static function refresh() {
-        if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
-        check_admin_referer('mwa_refresh');
+    public static function refresh($scheduled=false) {
+        if (!$scheduled) {
+            if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
+            check_admin_referer('mwa_refresh');
+        }
         $key = get_option(self::OPT_KEY, '');
         if (!$key) self::redirect('no_key');
         $next = (int) get_option(self::NEXT_ATTEMPT, 0);
@@ -163,9 +199,11 @@ final class MWA_Audit {
         update_option(self::LAST, time(), false);
         self::redirect('updated');
     }
-    public static function enrich_severity() {
-        if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
-        check_admin_referer('mwa_enrich');
+    public static function enrich_severity($scheduled=false) {
+        if (!$scheduled) {
+            if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
+            check_admin_referer('mwa_enrich');
+        }
         $key = get_option(self::OPT_KEY, '');
         if (!$key) self::redirect('no_key');
         if (time() < (int)get_option(self::NEXT_ATTEMPT,0)) self::redirect('throttled');
@@ -459,7 +497,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.3.3</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.0</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -498,6 +536,12 @@ final class MWA_Audit {
         echo '</div>';
         echo '<div style="background:#fff;border:1px solid #c3c4c7;padding:16px 20px;margin:14px 0;max-width:1080px">';
         echo '<h2 style="margin:0 0 12px">Data sources</h2>';
+        $scan_job=get_option('mwa_cron_scanner_result',[]);
+        $severity_job=get_option('mwa_cron_severity_result',[]);
+        echo '<p><strong>Automatic updates:</strong> Daily WP-Cron (scanner + severity, separated by at least one hour).</p>';
+        echo '<p><strong>Next scanner job:</strong> '.esc_html(($t=wp_next_scheduled(self::CRON_SCANNER))?wp_date('Y-m-d H:i:s T',$t):'Not scheduled').'</p>';
+        echo '<p><strong>Last scanner job:</strong> '.esc_html(is_array($scan_job)&&isset($scan_job['time'])?wp_date('Y-m-d H:i:s T',$scan_job['time']).' — '.($scan_job['status']??'unknown'):'Not run').'</p>';
+        echo '<p><strong>Last severity job:</strong> '.esc_html(is_array($severity_job)&&isset($severity_job['time'])?wp_date('Y-m-d H:i:s T',$severity_job['time']).' — '.($severity_job['status']??'unknown'):'Not run').'</p>';
         echo '<p><strong>MainWP inventory:</strong> '.esc_html((string)count($inventory)).' installed items in the locally synced inventory.</p>';
         echo '<p><strong>Wordfence feed:</strong> '.($when?esc_html(wp_date('Y-m-d H:i:s T',$when)):'Not yet downloaded').'</p>';
         echo '<p><strong>API key:</strong> '.($key_present?'Configured (not validated)':'Missing').' · <a href="'.esc_url(add_query_arg('mwa_tab','settings',$base)).'">API settings</a></p>';
@@ -605,3 +649,4 @@ final class MWA_Audit {
     }
 }
 MWA_Audit::init();
+register_deactivation_hook(__FILE__, ['MWA_Audit','deactivate']);
