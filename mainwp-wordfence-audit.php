@@ -608,6 +608,10 @@ final class MWA_Audit {
         echo '</div>';
         echo '<div style="background:#fff;border:1px solid #c3c4c7;padding:16px 20px;margin:14px 0;max-width:1080px">';
         echo '<h2 style="margin:0 0 12px">Data sources</h2>';
+        $mail_job=get_option(self::EMAIL_RESULT,[]);
+        echo '<p><strong>New-finding email:</strong> '.esc_html((string)get_option('admin_email','')).'</p>';
+        echo '<p><strong>Last notification check:</strong> '.esc_html(is_array($mail_job)&&isset($mail_job['time'])?wp_date('Y-m-d H:i:s T',$mail_job['time']).' - '.($mail_job['status']??'unknown').' ('.(int)($mail_job['count']??0).' findings)':'Not run').'</p>';
+
         $scan_job=get_option('mwa_cron_scanner_result',[]);
         $severity_job=get_option('mwa_cron_severity_result',[]);
         echo '<p><strong>Automatic updates:</strong> Daily WP-Cron (scanner + severity, separated by at least one hour).</p>';
