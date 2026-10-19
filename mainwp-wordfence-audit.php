@@ -2,6 +2,8 @@
 /**
  * Plugin Name: MainWP Wordfence Audit
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
+ *  Author: Joachim Daub
+ *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
  * Version: 0.4.2
  * Requires PHP: 7.4
  */
