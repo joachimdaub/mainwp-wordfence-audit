@@ -4,10 +4,12 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.4.2
+ * Version: 0.4.3
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
+
+require_once __DIR__.'/includes/class-github-updater.php';
 
 final class MWA_Audit {
     const OPT_KEY = 'mwa_wordfence_key';
@@ -592,7 +594,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.2</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.3</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
