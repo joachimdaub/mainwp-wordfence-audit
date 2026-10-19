@@ -1,0 +1,54 @@
+name: Package WordPress plugin
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+
+      - name: Verify version matches release tag
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          expected="${RELEASE_TAG#v}"
+          actual=$(sed -n 's/^ *\* Version: *//p' mainwp-wordfence-audit.php | head -n 1)
+          test "$actual" = "$expected" || { echo "Plugin version $actual does not match release $expected"; exit 1; }
+
+      - name: Lint plugin PHP
+        run: |
+          find . -type f -name '*.php' -not -path './.git/*' -print0 | xargs -0 -r -n1 php -l
+
+      - name: Build installable ZIP
+        run: |
+          mkdir -p dist/mainwp-wordfence-audit
+          cp mainwp-wordfence-audit.php dist/mainwp-wordfence-audit/
+          if [ -d includes ]; then cp -R includes dist/mainwp-wordfence-audit/; fi
+          if [ -d assets ]; then cp -R assets dist/mainwp-wordfence-audit/; fi
+          cd dist
+          zip -qr mainwp-wordfence-audit.zip mainwp-wordfence-audit
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mainwp-wordfence-audit
+          path: dist/mainwp-wordfence-audit.zip
+
+      - name: Attach ZIP to public GitHub release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/mainwp-wordfence-audit.zip --clobber
