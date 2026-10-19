@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MainWP Wordfence Audit
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
- * Version: 0.4.1
+ * Version: 0.4.2
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -21,6 +21,8 @@ final class MWA_Audit {
     const KNOWN = 'mwa_known_finding_keys_v1';
     const INVENTORY_USER = 'mwa_inventory_user_id';
     const EMAIL_RESULT = 'mwa_last_email_result';
+    const EMAIL_ENABLED = 'mwa_email_enabled';
+    const EMAIL_RECIPIENT = 'mwa_email_recipient';
     const CRON_NOTIFY = 'mwa_daily_finding_notification';
     private static $cron_context = false;
     const CRON_SCANNER = 'mwa_daily_scanner_refresh';
@@ -33,6 +35,7 @@ final class MWA_Audit {
         add_action(self::CRON_NOTIFY, [__CLASS__, 'notify_new_findings']);
         add_action('admin_menu', [__CLASS__, 'menu']);
         add_action('admin_post_mwa_save_key', [__CLASS__, 'save_key']);
+        add_action('admin_post_mwa_save_notifications', [__CLASS__, 'save_notifications']);
         add_action('admin_post_mwa_refresh', [__CLASS__, 'refresh']);
         add_action('admin_post_mwa_enrich', [__CLASS__, 'enrich_severity']);
         add_action('admin_post_mwa_ignore', [__CLASS__, 'ignore_action']);
@@ -90,6 +93,10 @@ final class MWA_Audit {
         return $found;
     }
     public static function notify_new_findings() {
+        if (!get_option(self::EMAIL_ENABLED, true)) {
+            update_option(self::EMAIL_RESULT,['time'=>time(),'status'=>'disabled'],false);
+            return;
+        }
         $found=self::current_findings();
         if (is_wp_error($found)) {
             update_option(self::EMAIL_RESULT,['time'=>time(),'status'=>$found->get_error_code()],false);
@@ -108,7 +115,8 @@ final class MWA_Audit {
             update_option(self::EMAIL_RESULT,['time'=>time(),'status'=>'no_new_findings','count'=>0],false);
             return;
         }
-        $email=get_option('admin_email','');
+        $email=get_option(self::EMAIL_RECIPIENT,'');
+        if (!$email) $email=get_option('admin_email','');
         if (!is_email($email)) {
             update_option(self::EMAIL_RESULT,['time'=>time(),'status'=>'invalid_email','count'=>count($new)],false);
             return;
@@ -135,6 +143,19 @@ final class MWA_Audit {
     private static function redirect($status) {
         if (self::$cron_context) throw new RuntimeException($status);
         wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_status'=>$status], admin_url('tools.php')));
+        exit;
+    }
+    public static function save_notifications() {
+        if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
+        check_admin_referer('mwa_save_notifications');
+        $enabled=isset($_POST['email_enabled']) && $_POST['email_enabled']==='1';
+        $raw=isset($_POST['email_recipient']) && is_string($_POST['email_recipient'])
+            ? trim(wp_unslash($_POST['email_recipient'])) : '';
+        $email=sanitize_email($raw);
+        if ($raw!=='' && (!is_email($email) || $email!==$raw)) self::redirect('invalid_email');
+        update_option(self::EMAIL_RECIPIENT,$email,false);
+        update_option(self::EMAIL_ENABLED,$enabled,false);
+        wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_tab'=>'settings','mwa_status'=>'notifications_saved'],admin_url('tools.php')));
         exit;
     }
     public static function save_key() {
@@ -569,7 +590,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.1</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.2</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -591,6 +612,20 @@ final class MWA_Audit {
             submit_button('Save API key','primary','submit',false);
             echo '</form>';
             echo '<p class="description">The standard API rate limit requires spacing requests. Feed refresh is available in Overview.</p></div>';
+            $email_enabled=(bool)get_option(self::EMAIL_ENABLED,true);
+            $email_recipient=(string)get_option(self::EMAIL_RECIPIENT,'');
+            echo '<div class="card" style="max-width:760px;padding:18px 24px;margin-top:18px">';
+            echo '<h2>Email notifications</h2>';
+            echo '<p class="description">Only newly discovered, confirmed and non-ignored findings trigger an email. Existing findings do not generate repeat alerts.</p>';
+            echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'">';
+            echo '<input type="hidden" name="action" value="mwa_save_notifications">';
+            wp_nonce_field('mwa_save_notifications');
+            echo '<p><label><input type="checkbox" name="email_enabled" value="1" '.checked($email_enabled,true,false).'> Enable email notifications</label></p>';
+            echo '<p><label for="mwa-email-recipient"><strong>Recipient email address</strong></label><br>';
+            echo '<input type="email" id="mwa-email-recipient" name="email_recipient" class="regular-text" value="'.esc_attr($email_recipient).'" placeholder="'.esc_attr((string)get_option('admin_email','')).'"></p>';
+            echo '<p class="description">Leave blank to use the WordPress administrator email. Disabling notifications preserves the last known findings baseline.</p>';
+            submit_button('Save notification settings','primary','submit',false);
+            echo '</form></div>';
             echo '</div>';
             return;
         }
@@ -609,7 +644,7 @@ final class MWA_Audit {
         echo '<div style="background:#fff;border:1px solid #c3c4c7;padding:16px 20px;margin:14px 0;max-width:1080px">';
         echo '<h2 style="margin:0 0 12px">Data sources</h2>';
         $mail_job=get_option(self::EMAIL_RESULT,[]);
-        echo '<p><strong>New-finding email:</strong> '.esc_html((string)get_option('admin_email','')).'</p>';
+        echo '<p><strong>New-finding email:</strong> '.(get_option(self::EMAIL_ENABLED,true)?'Enabled':'Disabled').' — '.esc_html((string)(get_option(self::EMAIL_RECIPIENT,'')?:get_option('admin_email',''))).'</p>';
         echo '<p><strong>Last notification check:</strong> '.esc_html(is_array($mail_job)&&isset($mail_job['time'])?wp_date('Y-m-d H:i:s T',$mail_job['time']).' - '.($mail_job['status']??'unknown').' ('.(int)($mail_job['count']??0).' findings)':'Not run').'</p>';
 
         $scan_job=get_option('mwa_cron_scanner_result',[]);
@@ -653,6 +688,8 @@ final class MWA_Audit {
                 'ignored'=>'Finding ignored.',
                 'restored'=>'Finding restored.',
                 'invalid_action'=>'Invalid finding action.',
+                'notifications_saved'=>'Notification settings saved.',
+                'invalid_email'=>'Please enter a valid recipient email address.',
             ];
             echo '<div class="notice '.($status==='api_error'?'notice-error':'notice-info').'"><p>'.esc_html($messages[$status]??'Request completed.').'</p></div>';
             if ($status==='api_error' && $last_error!=='') echo '<div class="notice notice-error"><p>'.esc_html($last_error).'</p></div>';
