@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MainWP Wordfence Audit
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
- * Version: 0.4.0
+ * Version: 0.4.1
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -18,6 +18,10 @@ final class MWA_Audit {
     const ERROR_OPTION = 'mwa_last_feed_error';
     const NEXT_ATTEMPT = 'mwa_next_feed_attempt';
     const IGNORED = 'mwa_ignored_findings_v1';
+    const KNOWN = 'mwa_known_finding_keys_v1';
+    const INVENTORY_USER = 'mwa_inventory_user_id';
+    const EMAIL_RESULT = 'mwa_last_email_result';
+    const CRON_NOTIFY = 'mwa_daily_finding_notification';
     private static $cron_context = false;
     const CRON_SCANNER = 'mwa_daily_scanner_refresh';
     const CRON_SEVERITY = 'mwa_daily_severity_refresh';
@@ -26,6 +30,7 @@ final class MWA_Audit {
         add_action('init', [__CLASS__, 'ensure_schedule']);
         add_action(self::CRON_SCANNER, [__CLASS__, 'cron_scanner']);
         add_action(self::CRON_SEVERITY, [__CLASS__, 'cron_severity']);
+        add_action(self::CRON_NOTIFY, [__CLASS__, 'notify_new_findings']);
         add_action('admin_menu', [__CLASS__, 'menu']);
         add_action('admin_post_mwa_save_key', [__CLASS__, 'save_key']);
         add_action('admin_post_mwa_refresh', [__CLASS__, 'refresh']);
@@ -36,10 +41,12 @@ final class MWA_Audit {
     public static function ensure_schedule() {
         if (!wp_next_scheduled(self::CRON_SCANNER)) wp_schedule_event(time()+300, 'daily', self::CRON_SCANNER);
         if (!wp_next_scheduled(self::CRON_SEVERITY)) wp_schedule_event(time()+3900, 'daily', self::CRON_SEVERITY);
+        if (!wp_next_scheduled(self::CRON_NOTIFY)) wp_schedule_event(time()+7200, 'daily', self::CRON_NOTIFY);
     }
     public static function deactivate() {
         wp_clear_scheduled_hook(self::CRON_SCANNER);
         wp_clear_scheduled_hook(self::CRON_SEVERITY);
+        wp_clear_scheduled_hook(self::CRON_NOTIFY);
     }
     public static function cron_scanner() { self::cron_run('scanner'); }
     public static function cron_severity() { self::cron_run('severity'); }
@@ -58,6 +65,67 @@ final class MWA_Audit {
         } finally {
             self::$cron_context=false;
             update_option('mwa_cron_'.$type.'_result', ['time'=>time(),'status'=>$status], false);
+        }
+    }
+    private static function current_findings() {
+        list($inventory,$error)=self::inventory();
+        if ($error || !$inventory) return new WP_Error('inventory_unavailable');
+        $index=self::cached_index();
+        if (!$index || !(int)get_option(self::LAST,0)) return new WP_Error('feed_unavailable');
+        $ignored=get_option(self::IGNORED,[]);
+        if (!is_array($ignored)) $ignored=[];
+        $found=[];
+        foreach ($inventory as $item) {
+            foreach ($index[$item['type'].'/'.strtolower($item['slug'])]??[] as $v) {
+                if (self::range_status($item['version'],$v['software']['affected_versions']??null)!=='affected') continue;
+                $id=self::finding_key($item,$v);
+                if (isset($ignored[$id])) continue;
+                $found[$id]=[
+                    'site'=>$item['site'],'software'=>$item['name'],
+                    'version'=>$item['version'],'title'=>(string)($v['row']['title']??$v['id']),
+                    'severity'=>self::severity($v),
+                ];
+            }
+        }
+        return $found;
+    }
+    public static function notify_new_findings() {
+        $found=self::current_findings();
+        if (is_wp_error($found)) {
+            update_option(self::EMAIL_RESULT,['time'=>time(),'status'=>$found->get_error_code()],false);
+            return;
+        }
+        $known=get_option(self::KNOWN,null);
+        if (!is_array($known)) {
+            // First successful comparison establishes baseline; do not email existing findings.
+            update_option(self::KNOWN,array_keys($found),false);
+            update_option(self::EMAIL_RESULT,['time'=>time(),'status'=>'baseline_created','count'=>count($found)],false);
+            return;
+        }
+        $new=array_diff_key($found,array_fill_keys($known,true));
+        if (!$new) {
+            update_option(self::KNOWN,array_keys($found),false);
+            update_option(self::EMAIL_RESULT,['time'=>time(),'status'=>'no_new_findings','count'=>0],false);
+            return;
+        }
+        $email=get_option('admin_email','');
+        if (!is_email($email)) {
+            update_option(self::EMAIL_RESULT,['time'=>time(),'status'=>'invalid_email','count'=>count($new)],false);
+            return;
+        }
+        $lines=['New, non-ignored WordPress vulnerabilities were detected:',''];
+        foreach ($new as $row) {
+            $lines[]=$row['site'].' | '.$row['software'].' '.$row['version'].' | '.$row['severity'];
+            $lines[]=$row['title'];
+            $lines[]='';
+        }
+        $lines[]='Review findings: '.admin_url('tools.php?page=mwa-audit');
+        $sent=wp_mail($email,'[MainWP Security Audit] '.count($new).' new vulnerabilities',implode("\n",$lines));
+        if ($sent) {
+            update_option(self::KNOWN,array_keys($found),false);
+            update_option(self::EMAIL_RESULT,['time'=>time(),'status'=>'sent','count'=>count($new)],false);
+        } else {
+            update_option(self::EMAIL_RESULT,['time'=>time(),'status'=>'send_failed','count'=>count($new)],false);
         }
     }
     private static function allowed() { return current_user_can('manage_options'); }
@@ -411,7 +479,10 @@ final class MWA_Audit {
         if (!class_exists('\\MainWP\\Dashboard\\MainWP_DB')) return [[], 'MainWP Dashboard nicht gefunden'];
         $db=\MainWP\Dashboard\MainWP_DB::instance();
         // MainWP stores synced inventory on its site records. All operations here are read-only.
-        $sites=$db->get_websites_by_user_id(get_current_user_id());
+        $user_id=get_current_user_id();
+        if (!$user_id) $user_id=(int)get_option(self::INVENTORY_USER,0);
+        if (!$user_id) return [[], 'No MainWP inventory user configured for background jobs'];
+        $sites=$db->get_websites_by_user_id($user_id);
         if (!is_array($sites)) return [[], 'MainWP hat keine Website-Liste zurückgegeben'];
         $out=[];
         foreach ($sites as $site) {
@@ -480,6 +551,7 @@ final class MWA_Audit {
     }
     public static function page() {
         if (!self::allowed()) wp_die('Forbidden','',['response'=>403]);
+        update_option(self::INVENTORY_USER, get_current_user_id(), false);
         $idx=self::cached_index();
         $when=(int)get_option(self::LAST,0);
         list($inventory,$error)=self::inventory();
@@ -497,7 +569,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.0</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.1</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
