@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.1
+ * Version: 0.5.2
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -124,24 +124,34 @@ final class MWA_Audit {
             'finished'=>time()
         ],false);
     }
-    private static function cron_run($type) {
-        if (!get_option(self::OPT_KEY, '')) return;
-        self::$cron_context=true;
+    private static function cron_execute($type, $callback) {
         $status='unknown';
+        $error=null;
+        self::$cron_context=true;
         try {
-            if ($type==='scanner') self::refresh(true);
-            else self::enrich_severity(true);
+            call_user_func($callback);
         } catch (RuntimeException $e) {
             $status=$e->getMessage();
         } catch (Throwable $e) {
             $status='unexpected_error';
-            $details=substr(sanitize_text_field($e->getMessage()),0,200);
-            update_option(self::ERROR_OPTION, 'Cron '.$type.' failed: '.get_class($e).' in '.basename($e->getFile()).':'.$e->getLine(), false);
-            update_option('mwa_cron_'.$type.'_error', ['time'=>time(),'type'=>get_class($e),'file'=>basename($e->getFile()),'line'=>$e->getLine(),'detail'=>$details], false);
+            $error=['time'=>time(),'type'=>get_class($e),'file'=>basename($e->getFile()),'line'=>$e->getLine(),'detail'=>substr(sanitize_text_field($e->getMessage()),0,200)];
+            update_option(self::ERROR_OPTION,'Cron '.$type.' failed: '.get_class($e).' in '.$error['file'].':'.$error['line'],false);
+            update_option('mwa_cron_'.$type.'_error',$error,false);
         } finally {
             self::$cron_context=false;
-            update_option('mwa_cron_'.$type.'_result', ['time'=>time(),'status'=>$status], false);
+            update_option('mwa_cron_'.$type.'_result',['time'=>time(),'status'=>$status],false);
         }
+        return $status;
+    }
+    private static function cron_run($type) {
+        if (!get_option(self::OPT_KEY,'')) {
+            update_option('mwa_cron_'.$type.'_result',['time'=>time(),'status'=>'no_key'],false);
+            return;
+        }
+        self::cron_execute($type,static function () use ($type) {
+            if ($type==='scanner') self::refresh(true);
+            else self::enrich_severity(true);
+        });
     }
     private static function current_findings() {
         list($inventory,$error)=self::inventory();
@@ -756,7 +766,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.1</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.2</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
