@@ -197,3 +197,9 @@ The public GitHub updater has been disabled in the plugin bootstrap until we are
 The isolated PHPUnit suite now includes synthetic Wordfence Scanner/Production-shaped JSON fixtures for the streaming parser. Tests verify matching installed software by type and case-insensitive slug, excluding unrelated software, preserving matched CVSS values, handling escaped JSON, and rejecting malformed or incomplete feed files. These tests use local temporary files and make **no Wordfence API requests**.
 
 GitHub Actions results must be reviewed before treating the suite as passing. The asynchronous cron orchestration and real MainWP data integration remain to be tested.
+
+## Combined refresh scheduling tests (v0.5.1)
+
+The test suite now covers the combined workflow's scheduling calculations: a short initial Scanner delay, respect for an existing API cooldown, a minimum one-hour gap before Production severity enrichment, and an extended cooldown when necessary. The code also records a failed severity rescheduling attempt instead of silently leaving the refresh waiting.
+
+These are isolated **scheduling unit tests**, not end-to-end tests of WP-Cron, the Wordfence API, or network failures. A green GitHub Actions run and real WordPress integration checks are still required.
