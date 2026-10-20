@@ -173,6 +173,21 @@ Wordfence documents that Production records are fully analyzed, while the Scanne
 
 This requires working WP-Cron or a system cron triggering WordPress. It is an asynchronous process, **not an immediate one-request refresh**. Live end-to-end testing and PHP lint remain mandatory before public release.
 
-## Preserving severity across scanner refreshes (v0.4.9)
+## Preserving severity across scanner refreshes (v0.5.0)
 
 A successful Scanner Feed refresh retains cached CVSS scores for matching vulnerability UUIDs. New or unmatched scanner records remain unrated until Production Feed enrichment succeeds. This avoids losing previously downloaded ratings during the enforced API cooldown. The stored **Severity data** timestamp still indicates the last successful Production Feed enrichment, not the time the preserved scores were reused.
+
+## Automated checks (v0.5.0)
+
+GitHub Actions runs PHP syntax checks and the PHPUnit unit-test suite for PHP 7.4, 8.2 and 8.4 on each push to `main`, pull requests, and manual workflow runs. Development dependencies are defined in `composer.json`; production installation does not require Composer.
+
+Run locally with:
+
+```sh
+composer install
+composer test
+```
+
+The initial suite covers version-boundary logic, multiple affected version ranges, malformed versions, CVSS severity thresholds and stable finding identities. These tests do **not** yet replace WordPress/MainWP integration tests for cron, remote APIs, ignored findings and email delivery.
+
+The public GitHub updater has been disabled in the plugin bootstrap until we are ready to publish. Release packaging is retained for later testing. Do not consider the project production-ready until GitHub CI and end-to-end tests pass.
