@@ -203,3 +203,9 @@ GitHub Actions results must be reviewed before treating the suite as passing. Th
 The test suite now covers the combined workflow's scheduling calculations: a short initial Scanner delay, respect for an existing API cooldown, a minimum one-hour gap before Production severity enrichment, and an extended cooldown when necessary. The code also records a failed severity rescheduling attempt instead of silently leaving the refresh waiting.
 
 These are isolated **scheduling unit tests**, not end-to-end tests of WP-Cron, the Wordfence API, or network failures. A green GitHub Actions run and real WordPress integration checks are still required.
+
+## Cron execution tests (v0.5.2)
+
+Cron execution is now isolated behind a callback runner for unit testing. Tests cover normal completion, expected RuntimeException statuses, unexpected exceptions with persisted diagnostics, and the stored outcome. Missing API configuration now records `no_key` instead of silently skipping cron execution.
+
+The tests are isolated and do not execute WordPress cron or contact Wordfence. Real-site verification remains necessary.
