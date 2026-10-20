@@ -23,4 +23,13 @@ if (!function_exists('update_option')) {
 if (!function_exists('sanitize_text_field')) {
     function sanitize_text_field($text) { return trim(strip_tags((string)$text)); }
 }
+$GLOBALS['mwa_test_scheduled_events']=[];
+$GLOBALS['mwa_test_schedule_success']=true;
+if (!function_exists('wp_schedule_single_event')) {
+    function wp_schedule_single_event($timestamp,$hook,$args=[]) {
+        if (!$GLOBALS['mwa_test_schedule_success']) return false;
+        $GLOBALS['mwa_test_scheduled_events'][]=['time'=>$timestamp,'hook'=>$hook,'args'=>$args];
+        return true;
+    }
+}
 require_once dirname(__DIR__).'/mainwp-wordfence-audit.php';
