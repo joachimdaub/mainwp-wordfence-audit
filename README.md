@@ -191,3 +191,9 @@ composer test
 The initial suite covers version-boundary logic, multiple affected version ranges, malformed versions, CVSS severity thresholds and stable finding identities. These tests do **not** yet replace WordPress/MainWP integration tests for cron, remote APIs, ignored findings and email delivery.
 
 The public GitHub updater has been disabled in the plugin bootstrap until we are ready to publish. Release packaging is retained for later testing. Do not consider the project production-ready until GitHub CI and end-to-end tests pass.
+
+## Feed parser tests
+
+The isolated PHPUnit suite now includes synthetic Wordfence Scanner/Production-shaped JSON fixtures for the streaming parser. Tests verify matching installed software by type and case-insensitive slug, excluding unrelated software, preserving matched CVSS values, handling escaped JSON, and rejecting malformed or incomplete feed files. These tests use local temporary files and make **no Wordfence API requests**.
+
+GitHub Actions results must be reviewed before treating the suite as passing. The asynchronous cron orchestration and real MainWP data integration remain to be tested.
