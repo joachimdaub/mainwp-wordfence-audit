@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.4.7
+ * Version: 0.4.8
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -726,7 +726,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.7</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.8</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -761,11 +761,11 @@ final class MWA_Audit {
             echo '<input type="email" id="mwa-email-recipient" name="email_recipient" class="regular-text" value="'.esc_attr($email_recipient).'" placeholder="'.esc_attr((string)get_option('admin_email','')).'"></p>';
             echo '<p class="description">Leave blank to use the WordPress administrator email. Disabling notifications preserves the last known findings baseline.</p>';
             submit_button('Save notification settings','primary','submit',false);
-            echo '</form></div>';
-            echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_test_email">';
+            echo '</form>';
+            echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="margin-top:12px"><input type="hidden" name="action" value="mwa_test_email">';
             wp_nonce_field('mwa_test_email');
             submit_button('Send test email','secondary','submit',false);
-            echo '</form>';
+            echo '</form></div>';
             echo '<div class="card" style="max-width:760px;padding:18px 24px;margin-top:18px">';
             echo '<h2>Dashboard visibility</h2><p class="description">Show a subtle finding count in the Tools menu and a summary widget on the WordPress dashboard. No pop-ups or Wordfence API requests.</p>';
             echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_save_visibility">';
