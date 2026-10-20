@@ -196,6 +196,7 @@ final class MWA_Audit {
         add_management_page('MainWP Security Audit',$title,'manage_options','mwa-audit',[__CLASS__,'page']);
     }
     private static function redirect($status) {
+        if (in_array($status,['updated','severity_updated','ignored','restored','inventory_refreshed'],true)) delete_transient('mwa_visibility_summary_v1');
         if (self::$cron_context) throw new RuntimeException($status);
         wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_status'=>$status], admin_url('tools.php')));
         exit;
