@@ -172,3 +172,7 @@ The Overview provides **Refresh vulnerabilities and severity**. This schedules a
 Wordfence documents that Production records are fully analyzed, while the Scanner Feed can also contain early, not-yet-fully-analyzed findings. Using Production alone could miss newly disclosed vulnerabilities. Both feeds retain their separate daily cron schedules for now; the shared API cooldown protects against back-to-back requests. The combined operation's status and next step are shown on the dashboard.
 
 This requires working WP-Cron or a system cron triggering WordPress. It is an asynchronous process, **not an immediate one-request refresh**. Live end-to-end testing and PHP lint remain mandatory before public release.
+
+## Preserving severity across scanner refreshes (v0.4.9)
+
+A successful Scanner Feed refresh retains cached CVSS scores for matching vulnerability UUIDs. New or unmatched scanner records remain unrated until Production Feed enrichment succeeds. This avoids losing previously downloaded ratings during the enforced API cooldown. The stored **Severity data** timestamp still indicates the last successful Production Feed enrichment, not the time the preserved scores were reused.
