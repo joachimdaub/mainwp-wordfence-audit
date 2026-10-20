@@ -209,3 +209,7 @@ These are isolated **scheduling unit tests**, not end-to-end tests of WP-Cron, t
 Cron execution is now isolated behind a callback runner for unit testing. Tests cover normal completion, expected RuntimeException statuses, unexpected exceptions with persisted diagnostics, and the stored outcome. Missing API configuration now records `no_key` instead of silently skipping cron execution.
 
 The tests are isolated and do not execute WordPress cron or contact Wordfence. Real-site verification remains necessary.
+
+## Combined refresh outcome tests (v0.5.3)
+
+Added isolated PHPUnit coverage for the Scanner-to-Severity transition, successful Severity completion, missing results, API throttling and unexpected errors. The combined workflow now uses a shared outcome classifier, ensuring that only expected success statuses move it forward. These tests do not yet execute real WordPress scheduled events or network requests; integration validation remains pending.
