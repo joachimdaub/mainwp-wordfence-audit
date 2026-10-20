@@ -146,3 +146,11 @@ A GitHub Actions workflow in `.github/workflows/release.yml` checks the PHP synt
 5. Check **Dashboard → Updates** or **Plugins** in WordPress to verify the update is offered. WordPress may cache release metadata for up to 12 hours, and automatic update checks follow WordPress scheduling.
 
 **Do not publish a GitHub release yet**: the scanner, cron and notification workflows still need end-to-end tests, and the repository is private. For now, the update checker will not distribute changes. No personal access token is stored.
+
+## Optional dashboard indicators (v0.4.5)
+
+The Settings tab contains **Dashboard visibility → Enable security indicators** (enabled by default). When enabled, the plugin adds a discreet count badge to its **Tools → MainWP Security Audit** submenu and a summary widget on the standard WordPress dashboard of the MainWP installation. It does not add banners, modals, or toolbar alerts, and does not modify managed child sites.
+
+Only confirmed, non-ignored findings are counted. The dashboard widget displays the number of affected websites and individual findings and links to the audit screen. Counts are cached for five minutes, and the cache is invalidated when the plugin refreshes the feed or changes ignored findings. An unavailable feed does not show a misleading zero-risk count.
+
+**Note:** This first widget uses the normal WordPress dashboard hook, not a native MainWP overview widget. A dedicated MainWP widget can be considered after verifying the extension hooks on the installed MainWP version. PHP lint and visual integration checks are still required before release.
