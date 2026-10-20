@@ -107,7 +107,10 @@ final class MWA_Audit {
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         if (time()<$next) {
             $at=$next+60;
-            wp_schedule_single_event($at,self::CRON_COMBINED_SEVERITY);
+            if (!wp_schedule_single_event($at,self::CRON_COMBINED_SEVERITY)) {
+                update_option(self::COMBINED_STATE,['status'=>'schedule_failed','detail'=>'Could not reschedule severity after cooldown.'],false);
+                return;
+            }
             update_option(self::COMBINED_STATE,['status'=>'waiting_severity','next'=>$at],false);
             return;
         }
