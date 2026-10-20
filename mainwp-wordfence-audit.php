@@ -138,7 +138,7 @@ final class MWA_Audit {
             $lines[]=$row['title'];
             $lines[]='';
         }
-        $lines[]='Review findings: '.admin_url('tools.php?page=mwa-audit');
+        $lines[]='Review findings: '.self::audit_url();
         $sent=wp_mail($email,'[MainWP Security Audit] '.count($new).' new vulnerabilities',implode("\n",$lines));
         if ($sent) {
             update_option(self::KNOWN,array_keys($found),false);
@@ -146,6 +146,13 @@ final class MWA_Audit {
         } else {
             update_option(self::EMAIL_RESULT,['time'=>time(),'status'=>'send_failed','count'=>count($new)],false);
         }
+    }
+    private static function audit_url() {
+        $file=get_option(self::MENU_LOCATION,'tools')==='top'?'admin.php':'tools.php';
+        return admin_url($file.'?page=mwa-audit');
+    }
+    private static function audit_base_file() {
+        return get_option(self::MENU_LOCATION,'tools')==='top'?'admin.php':'tools.php';
     }
     private static function visibility_enabled() {
         return (bool)get_option(self::VISIBILITY_ENABLED,true);
@@ -169,7 +176,7 @@ final class MWA_Audit {
         $location=isset($_POST['menu_location']) && is_string($_POST['menu_location']) ? sanitize_key(wp_unslash($_POST['menu_location'])) : 'tools';
         update_option(self::MENU_LOCATION,in_array($location,['tools','top'],true)?$location:'tools',false);
         delete_transient('mwa_visibility_summary_v1');
-        wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_tab'=>'settings','mwa_status'=>'visibility_saved'],admin_url('tools.php')));
+        wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_tab'=>'settings','mwa_status'=>'visibility_saved'],admin_url(self::audit_base_file())));
         exit;
     }
     public static function register_widget() {
@@ -187,7 +194,7 @@ final class MWA_Audit {
             echo '<p><strong>'.esc_html((string)$summary['sites']).' affected websites</strong> · '.esc_html((string)$summary['count']).' active findings</p>';
             echo '<p class="description">Confirmed, non-ignored vulnerabilities only.</p>';
         }
-        echo '<p><a class="button button-secondary" href="'.esc_url(admin_url('tools.php?page=mwa-audit')).'">View security audit</a></p>';
+        echo '<p><a class="button button-secondary" href="'.esc_url(self::audit_url()).'">View security audit</a></p>';
     }
     private static function allowed() { return current_user_can('manage_options'); }
     public static function menu() {
@@ -205,7 +212,7 @@ final class MWA_Audit {
     private static function redirect($status) {
         if (in_array($status,['updated','severity_updated','ignored','restored','inventory_refreshed'],true)) delete_transient('mwa_visibility_summary_v1');
         if (self::$cron_context) throw new RuntimeException($status);
-        wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_status'=>$status], admin_url('tools.php')));
+        wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_status'=>$status], admin_url(self::audit_base_file())));
         exit;
     }
     public static function test_email() {
@@ -230,7 +237,7 @@ final class MWA_Audit {
         if ($raw!=='' && (!is_email($email) || $email!==$raw)) self::redirect('invalid_email');
         update_option(self::EMAIL_RECIPIENT,$email,false);
         update_option(self::EMAIL_ENABLED,$enabled,false);
-        wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_tab'=>'settings','mwa_status'=>'notifications_saved'],admin_url('tools.php')));
+        wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_tab'=>'settings','mwa_status'=>'notifications_saved'],admin_url(self::audit_base_file())));
         exit;
     }
     public static function save_key() {
@@ -672,7 +679,7 @@ final class MWA_Audit {
         $key_present=(bool)get_option(self::OPT_KEY,'');
         $last_error=(string)get_option(self::ERROR_OPTION,'');
         $tab=isset($_GET['mwa_tab']) && is_string($_GET['mwa_tab']) && sanitize_key(wp_unslash($_GET['mwa_tab']))==='settings' ? 'settings' : 'overview';
-        $base=admin_url('tools.php?page=mwa-audit');
+        $base=self::audit_url();
         echo '<nav class="nav-tab-wrapper" aria-label="Audit navigation" style="margin:20px 0 16px">';
         echo '<a class="nav-tab '.($tab==='overview'?'nav-tab-active':'').'" href="'.esc_url($base).'">Overview</a>';
         echo '<a class="nav-tab '.($tab==='settings'?'nav-tab-active':'').'" href="'.esc_url(add_query_arg('mwa_tab','settings',$base)).'">Settings</a></nav>';
@@ -805,7 +812,7 @@ final class MWA_Audit {
         foreach (array_merge($hits,$unknown,$ignored_rows) as $pair) $sites[$pair[0]['site']]=true;
         $sites=array_keys($sites);
         sort($sites,SORT_STRING);
-        echo '<form method="get" action="'.esc_url(admin_url('tools.php')).'" style="margin:16px 0">';
+        echo '<form method="get" action="'.esc_url(admin_url(self::audit_base_file())).'" style="margin:16px 0">';
         echo '<input type="hidden" name="page" value="mwa-audit">';
         echo '<label for="mwa-site">Website: </label><select name="mwa_site" id="mwa-site"><option value="">All websites</option>';
         foreach ($sites as $site) echo '<option value="'.esc_attr($site).'" '.selected($site_filter,$site,false).'>'.esc_html($site).'</option>';
@@ -815,7 +822,7 @@ final class MWA_Audit {
         foreach (['severity_desc'=>'Highest severity first','severity_asc'=>'Lowest severity first'] as $value=>$label) echo '<option value="'.esc_attr($value).'" '.selected($sort,$value,false).'>'.esc_html($label).'</option>';
         echo '</select> ';
         submit_button('Apply filters','secondary','submit',false);
-        echo ' <a href="'.esc_url(admin_url('tools.php?page=mwa-audit')).'">Reset</a></form>';
+        echo ' <a href="'.esc_url(self::audit_url()).'">Reset</a></form>';
         $hits=self::filter_findings($hits,$site_filter,$severity_filter);
         $unknown=self::filter_findings($unknown,$site_filter,$severity_filter);
         $ignored_rows=self::filter_findings($ignored_rows,$site_filter,$severity_filter);
