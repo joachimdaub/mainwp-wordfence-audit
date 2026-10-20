@@ -147,7 +147,7 @@ A GitHub Actions workflow in `.github/workflows/release.yml` checks the PHP synt
 
 **Do not publish a GitHub release yet**: the scanner, cron and notification workflows still need end-to-end tests, and the repository is private. For now, the update checker will not distribute changes. No personal access token is stored.
 
-## Optional dashboard indicators (v0.4.6)
+## Optional dashboard indicators (v0.4.7)
 
 The Settings tab contains **Dashboard visibility → Enable security indicators** (enabled by default). When enabled, the plugin adds a discreet count badge to its **Tools → MainWP Security Audit** submenu and a summary widget on the standard WordPress dashboard of the MainWP installation. It does not add banners, modals, or toolbar alerts, and does not modify managed child sites.
 
@@ -155,8 +155,20 @@ Only confirmed, non-ignored findings are counted. The dashboard widget displays 
 
 **Note:** This first widget uses the normal WordPress dashboard hook, not a native MainWP overview widget. A dedicated MainWP widget can be considered after verifying the extension hooks on the installed MainWP version. PHP lint and visual integration checks are still required before release.
 
-## Configurable menu location (v0.4.6)
+## Configurable menu location (v0.4.7)
 
 In **Settings → Dashboard visibility**, choose **Tools submenu** (default) or **Separate top-level menu**. A top-level entry uses the WordPress shield icon and retains the existing counter badge when security indicators are enabled. Links, form redirects, the email review link and filter reset follow the selected location. Dashboard indicators remain independently toggleable. No managed child sites are changed.
 
 The feature still needs a live WordPress navigation and PHP syntax test before release.
+
+## Single-click vulnerability and severity refresh (v0.4.7)
+
+The Overview provides **Refresh vulnerabilities and severity**. This schedules a WordPress background workflow; it deliberately does **not** make both Wordfence API calls in the same HTTP request:
+
+1. Retrieve and index the comprehensive **Scanner Feed** when the shared API cooldown permits.
+2. If successful, schedule a **Production Feed** enrichment at least one hour later (or after a longer Wordfence cooldown).
+3. Keep the Scanner findings intact and attach CVSS ratings to matching vulnerability UUIDs. A severity-only failure does not erase the scanner results.
+
+Wordfence documents that Production records are fully analyzed, while the Scanner Feed can also contain early, not-yet-fully-analyzed findings. Using Production alone could miss newly disclosed vulnerabilities. Both feeds retain their separate daily cron schedules for now; the shared API cooldown protects against back-to-back requests. The combined operation's status and next step are shown on the dashboard.
+
+This requires working WP-Cron or a system cron triggering WordPress. It is an asynchronous process, **not an immediate one-request refresh**. Live end-to-end testing and PHP lint remain mandatory before public release.
