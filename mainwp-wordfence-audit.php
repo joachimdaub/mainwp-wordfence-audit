@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.4.4
+ * Version: 0.4.5
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -27,6 +27,7 @@ final class MWA_Audit {
     const EMAIL_RESULT = 'mwa_last_email_result';
     const EMAIL_ENABLED = 'mwa_email_enabled';
     const EMAIL_RECIPIENT = 'mwa_email_recipient';
+    const VISIBILITY_ENABLED = 'mwa_visibility_enabled';
     const CRON_NOTIFY = 'mwa_daily_finding_notification';
     private static $cron_context = false;
     const CRON_SCANNER = 'mwa_daily_scanner_refresh';
@@ -38,6 +39,8 @@ final class MWA_Audit {
         add_action(self::CRON_SEVERITY, [__CLASS__, 'cron_severity']);
         add_action(self::CRON_NOTIFY, [__CLASS__, 'notify_new_findings']);
         add_action('admin_menu', [__CLASS__, 'menu']);
+        add_action('wp_dashboard_setup', [__CLASS__, 'register_widget']);
+        add_action('admin_post_mwa_save_visibility', [__CLASS__, 'save_visibility']);
         add_action('admin_post_mwa_save_key', [__CLASS__, 'save_key']);
         add_action('admin_post_mwa_save_notifications', [__CLASS__, 'save_notifications']);
         add_action('admin_post_mwa_test_email', [__CLASS__, 'test_email']);
@@ -143,9 +146,54 @@ final class MWA_Audit {
             update_option(self::EMAIL_RESULT,['time'=>time(),'status'=>'send_failed','count'=>count($new)],false);
         }
     }
+    private static function visibility_enabled() {
+        return (bool)get_option(self::VISIBILITY_ENABLED,true);
+    }
+    private static function summary() {
+        // Cache briefly to avoid rebuilding large result sets on each admin page.
+        $cached=get_transient('mwa_visibility_summary_v1');
+        if (is_array($cached)) return $cached;
+        $found=self::current_findings();
+        if (is_wp_error($found)) return ['count'=>0,'sites'=>0,'ready'=>false];
+        $sites=[];
+        foreach ($found as $item) $sites[$item['site']]=true;
+        $summary=['count'=>count($found),'sites'=>count($sites),'ready'=>true];
+        set_transient('mwa_visibility_summary_v1',$summary,5*MINUTE_IN_SECONDS);
+        return $summary;
+    }
+    public static function save_visibility() {
+        if (!self::allowed()) wp_die('Forbidden','',['response'=>403]);
+        check_admin_referer('mwa_save_visibility');
+        update_option(self::VISIBILITY_ENABLED,isset($_POST['visibility_enabled']) && $_POST['visibility_enabled']==='1',false);
+        delete_transient('mwa_visibility_summary_v1');
+        wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_tab'=>'settings','mwa_status'=>'visibility_saved'],admin_url('tools.php')));
+        exit;
+    }
+    public static function register_widget() {
+        if (!self::allowed() || !self::visibility_enabled()) return;
+        // Only on the dashboard hosting MainWP; never on connected sites.
+        if (!class_exists('\\MainWP\\Dashboard\\MainWP_DB')) return;
+        wp_add_dashboard_widget('mwa_security_summary','MainWP Security Audit',[__CLASS__,'render_widget']);
+    }
+    public static function render_widget() {
+        if (!self::allowed()) return;
+        $summary=self::summary();
+        if (!$summary['ready']) {
+            echo '<p>Vulnerability data is not available yet.</p>';
+        } else {
+            echo '<p><strong>'.esc_html((string)$summary['sites']).' affected websites</strong> · '.esc_html((string)$summary['count']).' active findings</p>';
+            echo '<p class="description">Confirmed, non-ignored vulnerabilities only.</p>';
+        }
+        echo '<p><a class="button button-secondary" href="'.esc_url(admin_url('tools.php?page=mwa-audit')).'">View security audit</a></p>';
+    }
     private static function allowed() { return current_user_can('manage_options'); }
     public static function menu() {
-        add_management_page('MainWP Security Audit', 'MainWP Security Audit', 'manage_options', 'mwa-audit', [__CLASS__, 'page']);
+        $summary=self::visibility_enabled()?self::summary():['count'=>0,'ready'=>false];
+        $title='MainWP Security Audit';
+        if (!empty($summary['ready']) && $summary['count']>0) {
+            $title.=' <span class="update-plugins count-'.(int)$summary['count'].'"><span class="plugin-count">'.(int)$summary['count'].'</span></span>';
+        }
+        add_management_page('MainWP Security Audit',$title,'manage_options','mwa-audit',[__CLASS__,'page']);
     }
     private static function redirect($status) {
         if (self::$cron_context) throw new RuntimeException($status);
@@ -609,7 +657,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.4</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.5</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -649,6 +697,13 @@ final class MWA_Audit {
             wp_nonce_field('mwa_test_email');
             submit_button('Send test email','secondary','submit',false);
             echo '</form>';
+            echo '<div class="card" style="max-width:760px;padding:18px 24px;margin-top:18px">';
+            echo '<h2>Dashboard visibility</h2><p class="description">Show a subtle finding count in the Tools menu and a summary widget on the WordPress dashboard. No pop-ups or Wordfence API requests.</p>';
+            echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_save_visibility">';
+            wp_nonce_field('mwa_save_visibility');
+            echo '<p><label><input type="checkbox" name="visibility_enabled" value="1" '.checked(self::visibility_enabled(),true,false).'> Enable security indicators</label></p>';
+            submit_button('Save visibility settings','secondary','submit',false);
+            echo '</form></div>';
             echo '</div>';
             return;
         }
@@ -717,6 +772,7 @@ final class MWA_Audit {
                 'ignored'=>'Finding ignored.',
                 'restored'=>'Finding restored.',
                 'invalid_action'=>'Invalid finding action.',
+                'visibility_saved'=>'Visibility settings saved.',
                 'notifications_saved'=>'Notification settings saved.',
                 'invalid_email'=>'Please enter a valid recipient email address.',
             ];
