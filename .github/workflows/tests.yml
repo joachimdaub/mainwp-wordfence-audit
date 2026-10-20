@@ -1,0 +1,32 @@
+name: PHP checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.2', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer:v2
+          coverage: none
+      - name: Lint PHP sources
+        run: find . -type f -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -r -n1 php -l
+      - name: Install test dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+      - name: Run PHPUnit
+        run: composer test
