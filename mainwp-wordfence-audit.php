@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.0
+ * Version: 0.5.1
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -70,13 +70,18 @@ final class MWA_Audit {
     }
     public static function cron_scanner() { self::cron_run('scanner'); }
     public static function cron_severity() { self::cron_run('severity'); }
+    private static function combined_next_time($stage, $now, $cooldown) {
+        // Pure scheduling logic: test without WP-Cron or external HTTP requests.
+        if ($stage==='scanner') return max($now+15,$cooldown+10);
+        return max($now+3600,$cooldown+60);
+    }
     public static function start_combined() {
         if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
         check_admin_referer('mwa_combined');
         if (!get_option(self::OPT_KEY,'')) self::redirect('no_key');
         $state=get_option(self::COMBINED_STATE,[]);
         if (is_array($state) && in_array($state['status']??'', ['queued','scanner_running','waiting_severity','severity_running'],true)) self::redirect('already_queued');
-        $at=max(time()+15,(int)get_option(self::NEXT_ATTEMPT,0)+10);
+        $at=self::combined_next_time('scanner',time(),(int)get_option(self::NEXT_ATTEMPT,0));
         $scheduled=wp_schedule_single_event($at,self::CRON_COMBINED_SCANNER);
         if (!$scheduled) self::redirect('schedule_failed');
         update_option(self::COMBINED_STATE,['status'=>'queued','next'=>$at],false);
@@ -91,7 +96,7 @@ final class MWA_Audit {
             return;
         }
         // Preserve the API cooldown and allow for the free-tier Wordfence rate limit.
-        $at=max(time()+3600,(int)get_option(self::NEXT_ATTEMPT,0)+60);
+        $at=self::combined_next_time('severity',time(),(int)get_option(self::NEXT_ATTEMPT,0));
         if (!wp_schedule_single_event($at,self::CRON_COMBINED_SEVERITY)) {
             update_option(self::COMBINED_STATE,['status'=>'schedule_failed'],false);
             return;
@@ -748,7 +753,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.0</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.1</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
