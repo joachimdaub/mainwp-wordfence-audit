@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.2
+ * Version: 0.5.3
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -87,11 +87,18 @@ final class MWA_Audit {
         update_option(self::COMBINED_STATE,['status'=>'queued','next'=>$at],false);
         self::redirect('combined_queued');
     }
+    private static function combined_result_state($stage, $result) {
+        $expected=$stage==='scanner'?'updated':'severity_updated';
+        if (!is_array($result)) return $stage.'_failed';
+        return ($result['status']??'')===$expected
+            ? ($stage==='scanner'?'waiting_severity':'complete')
+            : $stage.'_failed';
+    }
     public static function combined_scanner() {
         update_option(self::COMBINED_STATE,['status'=>'scanner_running'],false);
         self::cron_run('scanner');
         $result=get_option('mwa_cron_scanner_result',[]);
-        if (!is_array($result) || ($result['status']??'')!=='updated') {
+        if (self::combined_result_state('scanner',$result)!=='waiting_severity') {
             update_option(self::COMBINED_STATE,['status'=>'scanner_failed','detail'=>(string)($result['status']??'unknown')],false);
             return;
         }
@@ -117,9 +124,9 @@ final class MWA_Audit {
         update_option(self::COMBINED_STATE,['status'=>'severity_running'],false);
         self::cron_run('severity');
         $result=get_option('mwa_cron_severity_result',[]);
-        $success=is_array($result) && ($result['status']??'')==='severity_updated';
+        $outcome=self::combined_result_state('severity',$result);
         update_option(self::COMBINED_STATE,[
-            'status'=>$success?'complete':'severity_failed',
+            'status'=>$outcome,
             'detail'=>(string)($result['status']??'unknown'),
             'finished'=>time()
         ],false);
@@ -766,7 +773,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.2</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.3</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
