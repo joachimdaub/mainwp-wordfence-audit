@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.4.3
+ * Version: 0.4.4
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -40,6 +40,7 @@ final class MWA_Audit {
         add_action('admin_menu', [__CLASS__, 'menu']);
         add_action('admin_post_mwa_save_key', [__CLASS__, 'save_key']);
         add_action('admin_post_mwa_save_notifications', [__CLASS__, 'save_notifications']);
+        add_action('admin_post_mwa_test_email', [__CLASS__, 'test_email']);
         add_action('admin_post_mwa_refresh', [__CLASS__, 'refresh']);
         add_action('admin_post_mwa_enrich', [__CLASS__, 'enrich_severity']);
         add_action('admin_post_mwa_ignore', [__CLASS__, 'ignore_action']);
@@ -68,7 +69,9 @@ final class MWA_Audit {
             $status=$e->getMessage();
         } catch (Throwable $e) {
             $status='unexpected_error';
-            update_option(self::ERROR_OPTION, 'Cron task failed: '.get_class($e), false);
+            $details=substr(sanitize_text_field($e->getMessage()),0,200);
+            update_option(self::ERROR_OPTION, 'Cron '.$type.' failed: '.get_class($e).' in '.basename($e->getFile()).':'.$e->getLine(), false);
+            update_option('mwa_cron_'.$type.'_error', ['time'=>time(),'type'=>get_class($e),'file'=>basename($e->getFile()),'line'=>$e->getLine(),'detail'=>$details], false);
         } finally {
             self::$cron_context=false;
             update_option('mwa_cron_'.$type.'_result', ['time'=>time(),'status'=>$status], false);
@@ -148,6 +151,18 @@ final class MWA_Audit {
         if (self::$cron_context) throw new RuntimeException($status);
         wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_status'=>$status], admin_url('tools.php')));
         exit;
+    }
+    public static function test_email() {
+        if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
+        check_admin_referer('mwa_test_email');
+        if (!get_option(self::EMAIL_ENABLED,true)) self::redirect('email_disabled');
+        $email=(string)get_option(self::EMAIL_RECIPIENT,'');
+        if (!$email) $email=(string)get_option('admin_email','');
+        if (!is_email($email)) self::redirect('invalid_email');
+        $sent=wp_mail($email,'[MainWP Security Audit] Test email',
+            "This is a delivery test. No vulnerability data has been modified.");
+        update_option('mwa_last_test_email', ['time'=>time(),'status'=>$sent?'accepted':'failed'],false);
+        self::redirect($sent?'test_email_sent':'test_email_failed');
     }
     public static function save_notifications() {
         if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
@@ -594,7 +609,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.3</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.4</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -630,6 +645,10 @@ final class MWA_Audit {
             echo '<p class="description">Leave blank to use the WordPress administrator email. Disabling notifications preserves the last known findings baseline.</p>';
             submit_button('Save notification settings','primary','submit',false);
             echo '</form></div>';
+            echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_test_email">';
+            wp_nonce_field('mwa_test_email');
+            submit_button('Send test email','secondary','submit',false);
+            echo '</form>';
             echo '</div>';
             return;
         }
@@ -649,6 +668,12 @@ final class MWA_Audit {
         echo '<h2 style="margin:0 0 12px">Data sources</h2>';
         $mail_job=get_option(self::EMAIL_RESULT,[]);
         echo '<p><strong>New-finding email:</strong> '.(get_option(self::EMAIL_ENABLED,true)?'Enabled':'Disabled').' — '.esc_html((string)(get_option(self::EMAIL_RECIPIENT,'')?:get_option('admin_email',''))).'</p>';
+        foreach (['scanner','severity'] as $job_type) {
+            $cron_error=get_option('mwa_cron_'.$job_type.'_error',[]);
+            if (is_array($cron_error) && !empty($cron_error['time'])) {
+                echo '<p><strong>Last '.esc_html($job_type).' cron error:</strong> '.esc_html(($cron_error['type']??'Error').' at '.($cron_error['file']??'?').':'.($cron_error['line']??'?').' — '.($cron_error['detail']??'')).'</p>';
+            }
+        }
         echo '<p><strong>Last notification check:</strong> '.esc_html(is_array($mail_job)&&isset($mail_job['time'])?wp_date('Y-m-d H:i:s T',$mail_job['time']).' - '.($mail_job['status']??'unknown').' ('.(int)($mail_job['count']??0).' findings)':'Not run').'</p>';
 
         $scan_job=get_option('mwa_cron_scanner_result',[]);
