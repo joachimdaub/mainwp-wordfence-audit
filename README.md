@@ -213,3 +213,7 @@ The tests are isolated and do not execute WordPress cron or contact Wordfence. R
 ## Combined refresh outcome tests (v0.5.3)
 
 Added isolated PHPUnit coverage for the Scanner-to-Severity transition, successful Severity completion, missing results, API throttling and unexpected errors. The combined workflow now uses a shared outcome classifier, ensuring that only expected success statuses move it forward. These tests do not yet execute real WordPress scheduled events or network requests; integration validation remains pending.
+
+## Combined WP-Cron event tests
+
+The isolated test environment now records simulated `wp_schedule_single_event()` calls. Integration-style tests exercise the actual `combined_severity()` and `combined_scanner()` entry points without external traffic: active cooldown rescheduling, scheduling failure reporting, and missing API key handling. No Wordfence API calls are made in these scenarios. Full WordPress and remote-response integration tests remain pending.
