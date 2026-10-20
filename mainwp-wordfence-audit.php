@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.4.6
+ * Version: 0.4.7
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -33,11 +33,17 @@ final class MWA_Audit {
     private static $cron_context = false;
     const CRON_SCANNER = 'mwa_daily_scanner_refresh';
     const CRON_SEVERITY = 'mwa_daily_severity_refresh';
+    const CRON_COMBINED_SCANNER = 'mwa_combined_scanner';
+    const CRON_COMBINED_SEVERITY = 'mwa_combined_severity';
+    const COMBINED_STATE = 'mwa_combined_refresh_state';
     const MIN_INTERVAL = 2700; // 45 minutes, above the default Wordfence limit.
     public static function init() {
         add_action('init', [__CLASS__, 'ensure_schedule']);
         add_action(self::CRON_SCANNER, [__CLASS__, 'cron_scanner']);
         add_action(self::CRON_SEVERITY, [__CLASS__, 'cron_severity']);
+        add_action(self::CRON_COMBINED_SCANNER, [__CLASS__, 'combined_scanner']);
+        add_action(self::CRON_COMBINED_SEVERITY, [__CLASS__, 'combined_severity']);
+        add_action('admin_post_mwa_combined', [__CLASS__, 'start_combined']);
         add_action(self::CRON_NOTIFY, [__CLASS__, 'notify_new_findings']);
         add_action('admin_menu', [__CLASS__, 'menu']);
         add_action('wp_dashboard_setup', [__CLASS__, 'register_widget']);
@@ -58,10 +64,58 @@ final class MWA_Audit {
     public static function deactivate() {
         wp_clear_scheduled_hook(self::CRON_SCANNER);
         wp_clear_scheduled_hook(self::CRON_SEVERITY);
+        wp_clear_scheduled_hook(self::CRON_COMBINED_SCANNER);
+        wp_clear_scheduled_hook(self::CRON_COMBINED_SEVERITY);
         wp_clear_scheduled_hook(self::CRON_NOTIFY);
     }
     public static function cron_scanner() { self::cron_run('scanner'); }
     public static function cron_severity() { self::cron_run('severity'); }
+    public static function start_combined() {
+        if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
+        check_admin_referer('mwa_combined');
+        if (!get_option(self::OPT_KEY,'')) self::redirect('no_key');
+        $state=get_option(self::COMBINED_STATE,[]);
+        if (is_array($state) && in_array($state['status']??'', ['queued','scanner_running','waiting_severity','severity_running'],true)) self::redirect('already_queued');
+        $at=max(time()+15,(int)get_option(self::NEXT_ATTEMPT,0)+10);
+        $scheduled=wp_schedule_single_event($at,self::CRON_COMBINED_SCANNER);
+        if (!$scheduled) self::redirect('schedule_failed');
+        update_option(self::COMBINED_STATE,['status'=>'queued','next'=>$at],false);
+        self::redirect('combined_queued');
+    }
+    public static function combined_scanner() {
+        update_option(self::COMBINED_STATE,['status'=>'scanner_running'],false);
+        self::cron_run('scanner');
+        $result=get_option('mwa_cron_scanner_result',[]);
+        if (!is_array($result) || ($result['status']??'')!=='updated') {
+            update_option(self::COMBINED_STATE,['status'=>'scanner_failed','detail'=>(string)($result['status']??'unknown')],false);
+            return;
+        }
+        // Preserve the API cooldown and allow for the free-tier Wordfence rate limit.
+        $at=max(time()+3600,(int)get_option(self::NEXT_ATTEMPT,0)+60);
+        if (!wp_schedule_single_event($at,self::CRON_COMBINED_SEVERITY)) {
+            update_option(self::COMBINED_STATE,['status'=>'schedule_failed'],false);
+            return;
+        }
+        update_option(self::COMBINED_STATE,['status'=>'waiting_severity','next'=>$at],false);
+    }
+    public static function combined_severity() {
+        $next=(int)get_option(self::NEXT_ATTEMPT,0);
+        if (time()<$next) {
+            $at=$next+60;
+            wp_schedule_single_event($at,self::CRON_COMBINED_SEVERITY);
+            update_option(self::COMBINED_STATE,['status'=>'waiting_severity','next'=>$at],false);
+            return;
+        }
+        update_option(self::COMBINED_STATE,['status'=>'severity_running'],false);
+        self::cron_run('severity');
+        $result=get_option('mwa_cron_severity_result',[]);
+        $success=is_array($result) && ($result['status']??'')==='severity_updated';
+        update_option(self::COMBINED_STATE,[
+            'status'=>$success?'complete':'severity_failed',
+            'detail'=>(string)($result['status']??'unknown'),
+            'finished'=>time()
+        ],false);
+    }
     private static function cron_run($type) {
         if (!get_option(self::OPT_KEY, '')) return;
         self::$cron_context=true;
@@ -672,7 +726,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.6</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.7</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -768,15 +822,19 @@ final class MWA_Audit {
         wp_nonce_field('mwa_inventory');
         submit_button('Recheck MainWP inventory','primary','submit',false);
         echo '</form>';
-        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="margin:0"><input type="hidden" name="action" value="mwa_refresh">';
-        wp_nonce_field('mwa_refresh');
-        submit_button('Refresh Wordfence feed','secondary','submit',false,($cooldown || !$key_present)?['disabled'=>'disabled']:[]);
-        echo '</form>';
-        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="margin:0"><input type="hidden" name="action" value="mwa_enrich">';
-        wp_nonce_field('mwa_enrich');
-        submit_button('Load severity ratings','secondary','submit',false,($cooldown || !$key_present || !$when)?['disabled'=>'disabled']:[]);
+        $combined=get_option(self::COMBINED_STATE,[]);
+        $in_progress=is_array($combined) && in_array($combined['status']??'', ['queued','scanner_running','waiting_severity','severity_running'],true);
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="margin:0"><input type="hidden" name="action" value="mwa_combined">';
+        wp_nonce_field('mwa_combined');
+        submit_button('Refresh vulnerabilities and severity','secondary','submit',false,(!$key_present || $in_progress)?['disabled'=>'disabled']:[]);
         echo '</form></div>';
-        echo '<p class="description" style="margin-bottom:0">MainWP recheck uses locally synced inventory without API calls. Use MainWP Sync to retrieve fresh data from child sites. Wordfence refresh downloads the external feed and is rate-limited.</p></div>';
+        $combined=get_option(self::COMBINED_STATE,[]);
+        if (is_array($combined) && !empty($combined['status'])) {
+            echo '<p><strong>Combined refresh:</strong> '.esc_html((string)$combined['status']);
+            if (!empty($combined['next'])) echo ' · Next step '.esc_html(wp_date('Y-m-d H:i:s T',(int)$combined['next']));
+            echo '</p>';
+        }
+        echo '<p class="description" style="margin-bottom:0">MainWP inventory is local. One combined refresh schedules the Scanner Feed first and the Production severity enrichment at least one hour later. Requires WP-Cron; it does not bypass Wordfence API limits.</p></div>';
         if (isset($_GET['mwa_status'])) {
             $status=sanitize_key(wp_unslash($_GET['mwa_status']));
             $messages=[
@@ -792,6 +850,9 @@ final class MWA_Audit {
                 'ignored'=>'Finding ignored.',
                 'restored'=>'Finding restored.',
                 'invalid_action'=>'Invalid finding action.',
+                'combined_queued'=>'Combined refresh scheduled. Scanner first; severity after the API cooldown.',
+                'already_queued'=>'A combined refresh is already running.',
+                'schedule_failed'=>'Could not schedule the background refresh.',
                 'visibility_saved'=>'Visibility settings saved.',
                 'notifications_saved'=>'Notification settings saved.',
                 'invalid_email'=>'Please enter a valid recipient email address.',
