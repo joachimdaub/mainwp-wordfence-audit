@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.4.5
+ * Version: 0.4.6
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -28,6 +28,7 @@ final class MWA_Audit {
     const EMAIL_ENABLED = 'mwa_email_enabled';
     const EMAIL_RECIPIENT = 'mwa_email_recipient';
     const VISIBILITY_ENABLED = 'mwa_visibility_enabled';
+    const MENU_LOCATION = 'mwa_menu_location';
     const CRON_NOTIFY = 'mwa_daily_finding_notification';
     private static $cron_context = false;
     const CRON_SCANNER = 'mwa_daily_scanner_refresh';
@@ -165,6 +166,8 @@ final class MWA_Audit {
         if (!self::allowed()) wp_die('Forbidden','',['response'=>403]);
         check_admin_referer('mwa_save_visibility');
         update_option(self::VISIBILITY_ENABLED,isset($_POST['visibility_enabled']) && $_POST['visibility_enabled']==='1',false);
+        $location=isset($_POST['menu_location']) && is_string($_POST['menu_location']) ? sanitize_key(wp_unslash($_POST['menu_location'])) : 'tools';
+        update_option(self::MENU_LOCATION,in_array($location,['tools','top'],true)?$location:'tools',false);
         delete_transient('mwa_visibility_summary_v1');
         wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_tab'=>'settings','mwa_status'=>'visibility_saved'],admin_url('tools.php')));
         exit;
@@ -193,7 +196,11 @@ final class MWA_Audit {
         if (!empty($summary['ready']) && $summary['count']>0) {
             $title.=' <span class="update-plugins count-'.(int)$summary['count'].'"><span class="plugin-count">'.(int)$summary['count'].'</span></span>';
         }
-        add_management_page('MainWP Security Audit',$title,'manage_options','mwa-audit',[__CLASS__,'page']);
+        if (get_option(self::MENU_LOCATION,'tools')==='top') {
+            add_menu_page('MainWP Security Audit',$title,'manage_options','mwa-audit',[__CLASS__,'page'],'dashicons-shield-alt',58);
+        } else {
+            add_management_page('MainWP Security Audit',$title,'manage_options','mwa-audit',[__CLASS__,'page']);
+        }
     }
     private static function redirect($status) {
         if (in_array($status,['updated','severity_updated','ignored','restored','inventory_refreshed'],true)) delete_transient('mwa_visibility_summary_v1');
@@ -658,7 +665,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.5</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.6</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -703,6 +710,11 @@ final class MWA_Audit {
             echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_save_visibility">';
             wp_nonce_field('mwa_save_visibility');
             echo '<p><label><input type="checkbox" name="visibility_enabled" value="1" '.checked(self::visibility_enabled(),true,false).'> Enable security indicators</label></p>';
+            $menu_location=get_option(self::MENU_LOCATION,'tools');
+            echo '<p><label for="mwa-menu-location"><strong>Menu location</strong></label><br><select id="mwa-menu-location" name="menu_location">';
+            echo '<option value="tools" '.selected($menu_location,'tools',false).'>Tools submenu (default)</option>';
+            echo '<option value="top" '.selected($menu_location,'top',false).'>Separate top-level menu</option></select></p>';
+            echo '<p class="description">Only the menu placement changes. The audit page and notification settings remain the same.</p>';
             submit_button('Save visibility settings','secondary','submit',false);
             echo '</form></div>';
             echo '</div>';
