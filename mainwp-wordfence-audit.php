@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.4.8
+ * Version: 0.4.9
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -410,6 +410,28 @@ final class MWA_Audit {
         @unlink($tmp);
         if (is_wp_error($index)) self::feed_error('Feed validation failed: '.$index->get_error_code());
         if (!$index['seen']) self::feed_error('The feed contained no vulnerability entries.');
+        // Preserve existing CVSS details for the same vulnerability ID after
+        // scanner refreshes. The scanner feed intentionally lacks CVSS.
+        $previous=self::cached_index();
+        $previous_ratings=[];
+        foreach ($previous as $entries) {
+            if (!is_array($entries)) continue;
+            foreach ($entries as $entry) {
+                if (!is_array($entry) || !isset($entry['id']) || !is_array($entry['row']??null)) continue;
+                $row=$entry['row'];
+                if (is_array($row['cvss']??null) && isset($row['cvss']['score']) && is_numeric($row['cvss']['score'])) {
+                    $previous_ratings[(string)$entry['id']]=$row['cvss'];
+                }
+            }
+        }
+        foreach ($index['matches'] as &$entries) {
+            foreach ($entries as &$entry) {
+                $id=(string)($entry['id']??'');
+                if (isset($previous_ratings[$id])) $entry['row']['cvss']=$previous_ratings[$id];
+            }
+            unset($entry);
+        }
+        unset($entries);
         $json = wp_json_encode($index['matches']);
         if (!is_string($json)) self::feed_error('Could not encode vulnerability index.');
         $target = trailingslashit($dir).self::INDEX_FILE;
@@ -726,7 +748,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.8</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.4.9</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
