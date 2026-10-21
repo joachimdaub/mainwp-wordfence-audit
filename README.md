@@ -257,3 +257,9 @@ The new `AdminSecurityTest` validates accepted API-key characters, the maximum k
 ## Escaping external advisory titles (v0.5.9)
 
 Wordfence advisory titles displayed in active or ignored findings are now consistently escaped as HTML text and truncated to 300 characters. Unexpected non-scalar values are not rendered. PHPUnit covers HTML-injection strings, oversized titles, and invalid value types. The current review focused on advisory title output; the full plugin security audit, permission integration tests, and production deployment verification remain open.
+
+## Real WordPress smoke testing
+
+GitHub Actions now runs a separate **WordPress integration smoke test** on pushes to `main`, pull requests and manual dispatch. It installs a disposable WordPress instance with MySQL, activates the plugin through WP-CLI and checks registered admin-post handlers, all three recurring cron hooks, role capabilities for an administrator versus a subscriber, and clearing recurring cron events during deactivation. No Wordfence API credentials are provided, and no customer sites are contacted.
+
+This is intentionally a **WordPress-only smoke test**, not yet a MainWP integration or live Wordfence refresh test. MainWP inventory access, filesystem migration on real hosting, email delivery and cron execution with remote responses remain open. Review the new GitHub Actions workflow status before claiming the smoke test passes.
