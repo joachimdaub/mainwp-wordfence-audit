@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.4
+ * Version: 0.5.5
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -497,25 +497,7 @@ final class MWA_Audit {
         @unlink($tmp);
         if (is_wp_error($production)) self::feed_error('Production feed validation failed: '.$production->get_error_code());
         if (empty($production['seen'])) self::feed_error('Production feed contained no vulnerability records.');
-        $details=[];
-        foreach ($production['matches'] as $entries) {
-            foreach ($entries as $entry) {
-                $details[(string)$entry['id']]=$entry['row'];
-            }
-        }
-        $enriched=0;
-        foreach ($old as &$entries) {
-            foreach ($entries as &$entry) {
-                $record=$details[(string)$entry['id']]??null;
-                if (!is_array($record)) continue;
-                $cvss=$record['cvss']??null;
-                if (!is_array($cvss) || !isset($cvss['score']) || !is_numeric($cvss['score'])) continue;
-                $entry['row']['cvss']=$cvss;
-                $enriched++;
-            }
-            unset($entry);
-        }
-        unset($entries);
+        list($old,$enriched)=self::apply_severity($old,$production);
         $payload=wp_json_encode($old);
         if (!is_string($payload)) self::feed_error('Could not encode enriched index.');
         $target=trailingslashit($dir).self::INDEX_FILE;
@@ -529,6 +511,28 @@ final class MWA_Audit {
         update_option('mwa_severity_enriched_count',$enriched,false);
         delete_option(self::ERROR_OPTION);
         self::redirect('severity_updated');
+    }
+    private static function apply_severity($index, $production) {
+        $details=[];
+        foreach ($production['matches'] as $entries) {
+            foreach ($entries as $entry) {
+                $details[(string)$entry['id']]=$entry['row'];
+            }
+        }
+        $enriched=0;
+        foreach ($index as &$entries) {
+            foreach ($entries as &$entry) {
+                $record=$details[(string)$entry['id']]??null;
+                if (!is_array($record)) continue;
+                $cvss=$record['cvss']??null;
+                if (!is_array($cvss) || !isset($cvss['score']) || !is_numeric($cvss['score'])) continue;
+                $entry['row']['cvss']=$cvss;
+                $enriched++;
+            }
+            unset($entry);
+        }
+        unset($entries);
+        return [$index,$enriched];
     }
     private static function storage_dir() {
         $uploads = wp_get_upload_dir();
@@ -760,7 +764,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.4</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.5</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
