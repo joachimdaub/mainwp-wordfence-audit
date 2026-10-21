@@ -58,4 +58,12 @@ if (!function_exists('wp_generate_password')) {
         return substr(bin2hex(random_bytes(16)),0,$length);
     }
 }
+if (!function_exists('esc_html')) {
+    function esc_html($value) { return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
+}
+if (!function_exists('wp_html_excerpt')) {
+    function wp_html_excerpt($str,$count,$more=null) {
+        return strlen($str)>$count ? substr($str,0,$count).($more??'') : $str;
+    }
+}
 require_once dirname(__DIR__).'/mainwp-wordfence-audit.php';
