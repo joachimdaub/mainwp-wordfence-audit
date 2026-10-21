@@ -243,3 +243,9 @@ define('MWA_PRIVATE_CACHE_DIR', '/absolute/private/path/mainwp-wordfence-audit')
 **Deployment note:** A directory outside `ABSPATH` is not guaranteed to be outside every custom web-server document root. Verify the chosen path cannot be served over HTTP, especially when WordPress is installed in a subdirectory or the web server exposes the parent directory. Do not deploy this storage migration to production until directory access and permissions have been verified.
 
 PHPUnit now checks the default path selection. Live filesystem migration, symlink and unusual hosting configurations still need integration tests and review before public beta.
+
+## Verified cache migration (v0.5.7)
+
+Legacy cache migration now writes a temporary file in the private destination directory, verifies a complete write, atomically renames it, and checks the resulting SHA-256 content hash before deleting the old uploads cache. An invalid existing destination or invalid legacy JSON prevents deletion of the source. Unit tests cover successful migration, malformed legacy data, an invalid existing destination, and a valid pre-existing destination.
+
+**Before production deployment:** verify that the private directory is outside the *actual web-server document root*, is writable by PHP, and that the old cache does not remain publicly accessible following a failed migration. Custom hosts, symlink behavior and filesystem permission failures still need live integration review. The private path alone cannot prove web-server isolation.
