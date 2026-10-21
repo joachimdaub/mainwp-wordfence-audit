@@ -32,6 +32,9 @@ if (!function_exists('wp_schedule_single_event')) {
         return true;
     }
 }
+if (!function_exists('is_wp_error')) {
+    function is_wp_error($value) { return $value instanceof WP_Error; }
+}
 $GLOBALS['mwa_test_http_response']=['code'=>200,'headers'=>[]];
 $GLOBALS['mwa_test_http_requests']=[];
 if (!function_exists('wp_remote_get')) {
