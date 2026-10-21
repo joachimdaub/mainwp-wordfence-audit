@@ -8,6 +8,11 @@ function mwa_scan_assert($ok,$message) {
     WP_CLI::log('PASS: '.$message);
 }
 
+$temporary=new ReflectionMethod('MWA_Audit','create_feed_temp_file');
+$temporary->setAccessible(true);
+$temp_path=$temporary->invoke(null,'scanner-fixture.json');
+mwa_scan_assert(is_string($temp_path) && is_file($temp_path),'Temporary feed file is created using real WordPress runtime');
+if (is_string($temp_path)) @unlink($temp_path);
 $execute=new ReflectionMethod('MWA_Audit','cron_execute');
 $execute->setAccessible(true);
 $feed=json_encode(['fixture-vulnerability'=>[
