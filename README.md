@@ -279,3 +279,7 @@ The WordPress integration workflow now runs `tests/integration/scanner-refresh.p
 ## Production CVSS HTTP-to-cache integration test
 
 The WordPress integration workflow now runs `tests/integration/severity-refresh.php` after the scanner test. It seeds a private scanner cache with matching and nonmatching findings, intercepts WordPress HTTP calls to the Production endpoint, and validates ID-based CVSS enrichment, preservation of scanner titles and unrelated scores, the enriched count, and the success timestamp. Malformed JSON and HTTP 500 fixtures must leave the previous cache and success timestamp intact. **The feed is simulated**; no external API request or live MainWP connection is made.
+
+## Notification cron integration (WordPress fixture)
+
+The WordPress workflow now runs `tests/integration/notification-cron.php` with a disposable MainWP database fixture and an intercepted `pre_wp_mail` transport. It asserts that initial findings establish a baseline without sending an email; one new confirmed vulnerability triggers exactly one email; subsequent runs do not duplicate it; and disabling notifications prevents mail while preserving the baseline. No outbound mail or MainWP child-site connections occur. Mail transport failure, ignored findings, and actual scheduled WP-Cron invocation remain to be tested.
