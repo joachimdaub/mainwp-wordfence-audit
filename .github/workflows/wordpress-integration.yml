@@ -47,6 +47,6 @@ jobs:
           cp mainwp-wordfence-audit.php /tmp/mwa-wp/wp-content/plugins/mainwp-wordfence-audit/
           php /tmp/wp-cli.phar plugin activate mainwp-wordfence-audit --path=/tmp/mwa-wp
       - name: Run WordPress integration assertions
-        run: php /tmp/wp-cli.phar eval-file tests/integration/wordpress-smoke.php --path=/tmp/mwa-wp
+        run: php /tmp/wp-cli.phar eval-file "$GITHUB_WORKSPACE/tests/integration/wordpress-smoke.php" --path=/tmp/mwa-wp
       - name: Deactivate plugin
         run: php /tmp/wp-cli.phar plugin deactivate mainwp-wordfence-audit --path=/tmp/mwa-wp
