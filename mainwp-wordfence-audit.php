@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.6
+ * Version: 0.5.7
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -542,6 +542,29 @@ final class MWA_Audit {
         }
         return dirname(rtrim(ABSPATH, '/\\')).'/mainwp-wordfence-audit-private';
     }
+    private static function migrate_legacy_cache($legacy, $target) {
+        if (!is_file($legacy) || is_link($legacy)) return false;
+        if (is_file($target)) {
+            $existing=@file_get_contents($target);
+            if (!is_string($existing) || !is_array(json_decode($existing,true))) return false;
+            return @unlink($legacy);
+        }
+        $raw=@file_get_contents($legacy);
+        if (!is_string($raw) || !is_array(json_decode($raw,true))) return false;
+        $stage=$target.'.tmp-'.wp_generate_password(12,false,false);
+        if (@file_put_contents($stage,$raw,LOCK_EX)!==strlen($raw)) {
+            @unlink($stage);
+            return false;
+        }
+        @chmod($stage,0600);
+        if (!@rename($stage,$target)) {
+            @unlink($stage);
+            return false;
+        }
+        $saved=@file_get_contents($target);
+        if (!is_string($saved) || !hash_equals(hash('sha256',$raw),hash('sha256',$saved))) return false;
+        return @unlink($legacy);
+    }
     private static function storage_dir() {
         $dir=self::private_cache_dir();
         $root=realpath(ABSPATH);
@@ -552,18 +575,12 @@ final class MWA_Audit {
         $actual=realpath($dir);
         if (!$actual || $actual===$root || strpos($actual,$root.DIRECTORY_SEPARATOR)===0) return new WP_Error('private_cache_path_unsafe');
         if (!is_writable($dir)) return new WP_Error('private_cache_not_writable');
-        // Migrate the old uploads cache only after the safe directory is available.
+        // Only remove legacy data after a verified, atomic migration.
         $uploads=wp_get_upload_dir();
         if (is_array($uploads) && empty($uploads['error']) && !empty($uploads['basedir'])) {
             $legacy=trailingslashit($uploads['basedir']).'mainwp-wordfence-audit/'.self::INDEX_FILE;
             $target=trailingslashit($dir).self::INDEX_FILE;
-            if (is_file($legacy) && !is_file($target)) {
-                $raw=@file_get_contents($legacy);
-                if (is_string($raw) && is_array(json_decode($raw,true))) {
-                    if (@file_put_contents($target,$raw,LOCK_EX)!==false) @chmod($target,0600);
-                }
-            }
-            if (is_file($legacy) && is_file($target)) @unlink($legacy);
+            if (is_file($legacy)) self::migrate_legacy_cache($legacy,$target);
         }
         return $dir;
     }
@@ -786,7 +803,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.6</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.7</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
