@@ -229,3 +229,17 @@ Malformed JSON rejection is covered by the separate streaming parser tests. An e
 The new `CacheAndSeverityTest` suite verifies that an invalid streaming feed is rejected without modifying an existing fixture cache, and that severity enrichment updates only matching vulnerability IDs with numeric CVSS scores while preserving other record fields and unmatched ratings. CVSS merging is isolated in `apply_severity()` for deterministic unit tests.
 
 Cache preservation is currently tested as a parser-plus-existing-file regression fixture, **not** as a complete HTTP-to-WordPress-cache integration scenario. Integration tests for filesystem failures and the full refresh transaction remain open before public beta.
+
+## Private cache directory (v0.5.6)
+
+The vulnerability index now defaults to `../mainwp-wordfence-audit-private/` relative to the WordPress application directory (`ABSPATH`), **outside** that application root. This prevents direct download via ordinary WordPress URLs on both Apache and Nginx. Existing valid JSON indexes are migrated on first access and the legacy uploads file is removed after a private target file exists. The installer must have permission to create/write the parent directory; otherwise feed refresh fails safely instead of writing an exposed cache.
+
+For hosts where the default parent is not writable, configure a private directory outside the WordPress application root in `wp-config.php` before activating this version:
+
+```php
+define('MWA_PRIVATE_CACHE_DIR', '/absolute/private/path/mainwp-wordfence-audit');
+```
+
+**Deployment note:** A directory outside `ABSPATH` is not guaranteed to be outside every custom web-server document root. Verify the chosen path cannot be served over HTTP, especially when WordPress is installed in a subdirectory or the web server exposes the parent directory. Do not deploy this storage migration to production until directory access and permissions have been verified.
+
+PHPUnit now checks the default path selection. Live filesystem migration, symlink and unusual hosting configurations still need integration tests and review before public beta.
