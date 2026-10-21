@@ -25,7 +25,7 @@ final class MainWPInventoryTest extends TestCase {
     }
 
     public function testMissingOrMalformedInventoryIsRejected(): void {
-        foreach ([null,[],['file'=>'../bad','version'=>'1.0'],['file'=>['unexpected'=>'type']],['slug'=>''],['slug'=>'sample','name'=>[]],['slug'=>'sample','version'=>[]]] as $item) {
+        foreach ([null,[],['file'=>'../bad','version'=>'1.0'],['slug'=>'.'],['slug'=>'..'],['file'=>['unexpected'=>'type']],['slug'=>''],['slug'=>'sample','name'=>[]],['slug'=>'sample','version'=>[]]] as $item) {
             $this->assertNull($this->normalize($item));
         }
     }
