@@ -17,11 +17,11 @@ namespace MainWP\Dashboard {
     }
 }
 namespace {
+    use PHPUnit\Framework\TestCase;
+    use MainWP\Dashboard\MainWP_DB;
     if (!function_exists('get_current_user_id')) {
         function get_current_user_id() { return 0; }
     }
-    use PHPUnit\Framework\TestCase;
-    use MainWP\Dashboard\MainWP_DB;
 
     final class MainWPInventoryAdapterTest extends TestCase {
         protected function setUp(): void {
