@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.12
+ * Version: 0.5.13
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -447,13 +447,20 @@ final class MWA_Audit {
         if (!$tmp) self::feed_error('Could not create temporary download file.');
         self::download_feed(self::ENDPOINT,$key,$tmp,'Wordfence');
         // Extract only the installed software's vulnerabilities, not the entire feed.
-        list($inventory,) = self::inventory();
+        list($inventory,$inventory_error) = self::inventory();
+        if ($inventory_error || !$inventory) {
+            @unlink($tmp);
+            self::feed_error('Scanner inventory unavailable or empty; existing cache preserved.');
+        }
         $wanted = [];
         foreach ($inventory as $item) $wanted[$item['type'].'/'.strtolower($item['slug'])] = true;
         $index = self::stream_index($tmp, $wanted);
         @unlink($tmp);
         if (is_wp_error($index)) self::feed_error('Feed validation failed: '.$index->get_error_code());
         if (!$index['seen']) self::feed_error('The feed contained no vulnerability entries.');
+        // Fail closed if an unexpectedly empty match would erase existing findings.
+        // A zero-match scanner result needs a separate explicit verification.
+        if (empty($index['matches'])) self::feed_error('Scanner matched no installed software; existing cache preserved.');
         // Preserve existing CVSS details for the same vulnerability ID after
         // scanner refreshes. The scanner feed intentionally lacks CVSS.
         $previous=self::cached_index();
@@ -829,7 +836,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.12</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.13</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
