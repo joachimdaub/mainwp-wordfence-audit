@@ -293,3 +293,7 @@ The WordPress notification integration fixture now also tests failed `pre_wp_mai
 Legacy cache migration now explicitly refuses symbolic links at both the old index and destination index, and private cache directory setup rejects a symlink at its selected directory path. Regression tests cover both symlink conditions as well as a nonexistent, non-writable destination parent: the existing legacy cache must remain intact.
 
 These are filesystem-level regression tests, not proof that a hosting-specific path is inaccessible through HTTP. Before deploying, verify the configured cache directory is outside the server's actual public document root, is writable by PHP, and is not exposed through an alias or other web-server mapping. Testing symlinked ancestor directories and alternative webroots remains part of the hosting review.
+
+## Runtime fix: temporary feed files (v0.5.12)
+
+Both feed downloads previously called `wp_tempnam()`, which is not a WordPress Core function. In production cron execution this caused a fatal `undefined function` error before scanner or severity downloads could start. Both endpoints now use PHP `tempnam()` inside the directory returned by WordPress `get_temp_dir()`. The WordPress integration test verifies that the helper creates a real temporary file. Deploy to a staging environment first and verify scheduled refresh status and private cache write permissions before using on a production dashboard.
