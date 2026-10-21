@@ -723,7 +723,7 @@ final class MWA_Audit {
         if (!is_string($path)) return null;
         $slug=$type==='plugin' ? explode('/',$path)[0] : $path;
         // Never infer a slug from the plugin name or an ambiguous file name.
-        if ($slug==='' || !preg_match('/^[a-zA-Z0-9_.-]+$/D',$slug)) return null;
+        if ($slug==='' || $slug==='.' || $slug==='..' || !preg_match('/^[a-zA-Z0-9_.-]+$/D',$slug)) return null;
         $version=$item['version']??'';
         $name=$item['name']??$slug;
         if (!is_string($version) && !is_numeric($version)) return null;
