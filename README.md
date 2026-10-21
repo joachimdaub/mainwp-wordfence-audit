@@ -271,3 +271,7 @@ MainWP plugin and theme inventory entries are now normalized through a dedicated
 ## MainWP database-adapter tests
 
 `MainWPInventoryAdapterTest` exercises the inventory-reading method with a simulated `MainWP_DB` implementation. It covers multiple websites, JSON and serialized inventories, website-option fallback, malformed rows, and background execution without a configured inventory user. This is an interface-level integration test, **not** a test against a real MainWP Dashboard database. A separate MainWP-enabled staging installation is still required before the beta release.
+
+## Scanner HTTP-to-cache WordPress integration check
+
+The WordPress integration workflow now runs `tests/integration/scanner-refresh.php` with the WordPress HTTP transport intercepted by a local fixture. It tests a successful scanner refresh, malformed JSON rejection, HTTP 500 handling, persistence of the previous cache, and the last-success timestamp. This runs against a real disposable WordPress installation with no MainWP inventory and **does not contact Wordfence**. Matching vulnerabilities for actual MainWP sites and production CVSS enrichment remain separate integration tasks.
