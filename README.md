@@ -283,3 +283,7 @@ The WordPress integration workflow now runs `tests/integration/severity-refresh.
 ## Notification cron integration (WordPress fixture)
 
 The WordPress workflow now runs `tests/integration/notification-cron.php` with a disposable MainWP database fixture and an intercepted `pre_wp_mail` transport. It asserts that initial findings establish a baseline without sending an email; one new confirmed vulnerability triggers exactly one email; subsequent runs do not duplicate it; and disabling notifications prevents mail while preserving the baseline. No outbound mail or MainWP child-site connections occur. Mail transport failure, ignored findings, and actual scheduled WP-Cron invocation remain to be tested.
+
+### Notification failure and ignored-finding regressions
+
+The WordPress notification integration fixture now also tests failed `pre_wp_mail` delivery, preserving the known-finding baseline so a subsequent successful attempt can retry without duplication. It verifies that ignored vulnerability IDs do not enter the confirmed-notification baseline or trigger an email, and dispatches the registered WordPress cron action with `do_action`. This validates hook wiring within a WordPress request, **not** the separate HTTP spawning or timing behavior of the WP-Cron scheduler.
