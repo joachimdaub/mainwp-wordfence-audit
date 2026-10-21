@@ -70,6 +70,12 @@ mwa_scan_assert(file_get_contents($path)===$before,'Empty inventory cannot repla
 update_option(MWA_Audit::NEXT_ATTEMPT,0,false);
 $status=$run();
 mwa_scan_assert($status==='api_error','Unmatched scanner feed rejects cache replacement');
+$diag=get_option(MWA_Audit::SCANNER_DIAGNOSTICS,[]);
+mwa_scan_assert((int)($diag['inventory_slugs']??-1)===1,'Scanner diagnostics count distinct inventory slugs');
+mwa_scan_assert((int)($diag['feed_vulnerabilities']??-1)===1,'Scanner diagnostics count feed entries');
+mwa_scan_assert((int)($diag['valid_software_slugs']??-1)===1,'Scanner diagnostics count valid software slugs');
+mwa_scan_assert((int)($diag['matched_records']??-1)===0,'Scanner diagnostics retain zero-match counts after rejected refresh');
+mwa_scan_assert((int)($diag['matched_slugs']??-1)===0,'Scanner diagnostics identify zero overlapping slugs');
 mwa_scan_assert(file_get_contents($path)===$before,'Zero matches cannot erase cached findings');
 mwa_scan_assert($requests===5,'Both empty-inventory and zero-match checks preserve cache after intercepted HTTP requests');
 remove_filter('pre_http_request',$mock,10);
