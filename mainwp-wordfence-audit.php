@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.8
+ * Version: 0.5.9
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -364,6 +364,11 @@ final class MWA_Audit {
         }
         update_option(self::IGNORED, $ignored, false);
         self::redirect($mode==='ignore'?'ignored':'restored');
+    }
+    private static function safe_finding_title($value) {
+        // External advisory titles are always rendered as text, never HTML.
+        if (!is_string($value) && !is_numeric($value)) return '';
+        return esc_html(wp_html_excerpt((string)$value, 300, '…'));
     }
     private static function severity($v) {
         $row=$v['row']??[];
@@ -806,7 +811,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.8</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.9</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -985,7 +990,7 @@ final class MWA_Audit {
             echo '<table class="widefat striped"><thead><tr><th>Website</th><th>Plugin or Theme</th><th>Last known version</th><th>Vulnerability</th><th>Action</th></tr></thead><tbody>';
             foreach ($archived as $key=>$meta) {
                 if (!is_array($meta)) $meta=[];
-                echo '<tr><td>'.esc_html($meta['site']??'Unknown').'</td><td>'.esc_html(($meta['type']??'').' / '.($meta['name']??($meta['slug']??'Unknown'))).'</td><td>'.esc_html($meta['version']??'').'</td><td>'.esc_html($meta['title']??'Not in current results').'</td><td>';
+                echo '<tr><td>'.esc_html($meta['site']??'Unknown').'</td><td>'.esc_html(($meta['type']??'').' / '.($meta['name']??($meta['slug']??'Unknown'))).'</td><td>'.esc_html($meta['version']??'').'</td><td>'.self::safe_finding_title($meta['title']??'Not in current results').'</td><td>';
                 self::action_form($key,'restore','Unignore');
                 echo '</td></tr>';
             }
@@ -998,7 +1003,7 @@ final class MWA_Audit {
         if (!$rows) echo '<tr><td colspan="6">No entries</td></tr>';
         foreach ($rows as $pair) {
             list($item,$v)=$pair;
-            echo '<tr><td>'.esc_html($item['site']).'</td><td>'.esc_html($item['type'].' / '.$item['name'].' ('.$item['slug'].')').'</td><td>'.esc_html($item['version']).'</td><td>'.esc_html(self::severity($v)).'</td><td>'.esc_html($v['row']['title']??(string)$v['id']).'</td><td>';
+            echo '<tr><td>'.esc_html($item['site']).'</td><td>'.esc_html($item['type'].' / '.$item['name'].' ('.$item['slug'].')').'</td><td>'.esc_html($item['version']).'</td><td>'.esc_html(self::severity($v)).'</td><td>'.self::safe_finding_title($v['row']['title']??(string)$v['id']).'</td><td>';
             self::action_form(self::finding_key($item,$v),$restore?'restore':'ignore',$restore?'Unignore':'Ignore');
             // Navigate to MainWP for updates; never perform remote updates here.
             echo ' <a class="button button-small" href="'.esc_url(admin_url('admin.php?page=managesites')).'">Open MainWP</a>';
