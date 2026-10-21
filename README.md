@@ -275,3 +275,7 @@ MainWP plugin and theme inventory entries are now normalized through a dedicated
 ## Scanner HTTP-to-cache WordPress integration check
 
 The WordPress integration workflow now runs `tests/integration/scanner-refresh.php` with the WordPress HTTP transport intercepted by a local fixture. It tests a successful scanner refresh, malformed JSON rejection, HTTP 500 handling, persistence of the previous cache, and the last-success timestamp. This runs against a real disposable WordPress installation with no MainWP inventory and **does not contact Wordfence**. Matching vulnerabilities for actual MainWP sites and production CVSS enrichment remain separate integration tasks.
+
+## Production CVSS HTTP-to-cache integration test
+
+The WordPress integration workflow now runs `tests/integration/severity-refresh.php` after the scanner test. It seeds a private scanner cache with matching and nonmatching findings, intercepts WordPress HTTP calls to the Production endpoint, and validates ID-based CVSS enrichment, preservation of scanner titles and unrelated scores, the enriched count, and the success timestamp. Malformed JSON and HTTP 500 fixtures must leave the previous cache and success timestamp intact. **The feed is simulated**; no external API request or live MainWP connection is made.
