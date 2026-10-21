@@ -253,3 +253,7 @@ Legacy cache migration now writes a temporary file in the private destination di
 ## Admin authorization and API key regression checks (v0.5.8)
 
 The new `AdminSecurityTest` validates accepted API-key characters, the maximum key length and rejection of unexpected types, whitespace and header-injection characters. It also guards every registered `admin_post_mwa_*` entry point against accidental removal of its capability check and action-specific WordPress nonce check. These checks are static unit regressions and do not replace a real WordPress capability/CSRF integration test. The plugin continues to store its Wordfence API key as a non-autoloaded WordPress option; privileged database access can reveal it, so production database access controls remain important.
+
+## Escaping external advisory titles (v0.5.9)
+
+Wordfence advisory titles displayed in active or ignored findings are now consistently escaped as HTML text and truncated to 300 characters. Unexpected non-scalar values are not rendered. PHPUnit covers HTML-injection strings, oversized titles, and invalid value types. The current review focused on advisory title output; the full plugin security audit, permission integration tests, and production deployment verification remain open.
