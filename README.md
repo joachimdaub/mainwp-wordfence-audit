@@ -223,3 +223,9 @@ The isolated test environment now records simulated `wp_schedule_single_event()`
 Both Wordfence feeds now share a single streamed-download helper. PHPUnit uses a local mock of WordPress HTTP functions to verify HTTP 200, HTTP 429 with `Retry-After`, HTTP 500, transport errors and production-endpoint throttling. Failed downloads must remove their temporary files and record an error; the tests make no live API requests.
 
 Malformed JSON rejection is covered by the separate streaming parser tests. An end-to-end test that verifies the persistent vulnerability index remains unchanged after feed errors, and a successful CVSS enrichment test, are still pending. Review GitHub Actions results before treating this version as validated.
+
+## Cache integrity and CVSS enrichment tests (v0.5.5)
+
+The new `CacheAndSeverityTest` suite verifies that an invalid streaming feed is rejected without modifying an existing fixture cache, and that severity enrichment updates only matching vulnerability IDs with numeric CVSS scores while preserving other record fields and unmatched ratings. CVSS merging is isolated in `apply_severity()` for deterministic unit tests.
+
+Cache preservation is currently tested as a parser-plus-existing-file regression fixture, **not** as a complete HTTP-to-WordPress-cache integration scenario. Integration tests for filesystem failures and the full refresh transaction remain open before public beta.
