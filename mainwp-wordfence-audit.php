@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.7
+ * Version: 0.5.8
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -319,11 +319,14 @@ final class MWA_Audit {
         wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_tab'=>'settings','mwa_status'=>'notifications_saved'],admin_url(self::audit_base_file())));
         exit;
     }
+    private static function valid_api_key($key) {
+        return is_string($key) && strlen($key)<=512 && !preg_match('/[^a-zA-Z0-9_.\\-]/', $key);
+    }
     public static function save_key() {
         if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
         check_admin_referer('mwa_save_key');
         $key = isset($_POST['api_key']) && is_string($_POST['api_key']) ? trim(wp_unslash($_POST['api_key'])) : '';
-        if (strlen($key)>512 || preg_match('/[^a-zA-Z0-9_.\-]/', $key)) self::redirect('invalid_key');
+        if (!self::valid_api_key($key)) self::redirect('invalid_key');
         if ($key !== '') update_option(self::OPT_KEY, $key, false);
         self::redirect('saved');
     }
@@ -803,7 +806,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.7</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.8</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
