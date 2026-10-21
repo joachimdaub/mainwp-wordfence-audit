@@ -17,6 +17,9 @@ namespace MainWP\Dashboard {
     }
 }
 namespace {
+    if (!function_exists('get_current_user_id')) {
+        function get_current_user_id() { return 0; }
+    }
     use PHPUnit\Framework\TestCase;
     use MainWP\Dashboard\MainWP_DB;
 
