@@ -49,4 +49,25 @@ final class CacheMigrationTest extends TestCase {
         $this->assertSame('{"new":[]}',file_get_contents($target));
         $this->assertFileDoesNotExist($source);
     }
+    public function testSymlinkedLegacySourceIsRejected(): void {
+        if (!function_exists('symlink')) $this->markTestSkipped('Symlinks unavailable');
+        $source=$this->dir.'/old.json'; $real=$this->dir.'/real.json'; $target=$this->dir.'/new.json';
+        file_put_contents($real,'{"valid":[]}');
+        if (!@symlink($real,$source)) $this->markTestSkipped('Symlinks not permitted');
+        $this->assertFalse($this->migrate($source,$target));
+        $this->assertFileExists($real);
+        $this->assertFileDoesNotExist($target);
+    }
+
+    public function testSymlinkedDestinationIsNotTrustedOrDeleted(): void {
+        if (!function_exists('symlink')) $this->markTestSkipped('Symlinks unavailable');
+        $source=$this->dir.'/old.json'; $real=$this->dir.'/real.json'; $target=$this->dir.'/new.json';
+        file_put_contents($source,'{"old":[]}');
+        file_put_contents($real,'{"existing":[]}');
+        if (!@symlink($real,$target)) $this->markTestSkipped('Symlinks not permitted');
+        $this->assertFalse($this->migrate($source,$target));
+        $this->assertFileExists($source);
+        $this->assertSame('{"existing":[]}',file_get_contents($real));
+    }
+
 }
