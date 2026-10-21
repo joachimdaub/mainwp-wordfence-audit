@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.9
+ * Version: 0.5.10
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -717,6 +717,19 @@ final class MWA_Audit {
         }
         return is_array($raw)?$raw:[];
     }
+    private static function normalize_inventory_item($item, $type, $site) {
+        if (!is_array($item) || !in_array($type,['plugin','theme'],true)) return null;
+        $path=$item['slug']??$item['file']??'';
+        if (!is_string($path)) return null;
+        $slug=$type==='plugin' ? explode('/',$path)[0] : $path;
+        // Never infer a slug from the plugin name or an ambiguous file name.
+        if ($slug==='' || !preg_match('/^[a-zA-Z0-9_.-]+$/D',$slug)) return null;
+        $version=$item['version']??'';
+        $name=$item['name']??$slug;
+        if (!is_string($version) && !is_numeric($version)) return null;
+        if (!is_string($name) && !is_numeric($name)) return null;
+        return ['site'=>(string)$site,'type'=>$type,'slug'=>$slug,'name'=>(string)$name,'version'=>(string)$version];
+    }
     private static function inventory() {
         if (!class_exists('\\MainWP\\Dashboard\\MainWP_DB')) return [[], 'MainWP Dashboard nicht gefunden'];
         $db=\MainWP\Dashboard\MainWP_DB::instance();
@@ -739,12 +752,8 @@ final class MWA_Audit {
                 }
                 foreach (self::unpack($raw) as $item) {
                     if (!is_array($item)) continue;
-                    $path=(string)($item['slug']??$item['file']??'');
-                    $slug=$type==='plugin' ? explode('/', $path)[0] : $path;
-                    // Never guess a slug based on a display name: false positives are worse than an unknown.
-                    if (!preg_match('/^[a-zA-Z0-9_.-]+$/',$slug)) continue;
-                    $version=(string)($item['version']??'');
-                    $out[]=['site'=>$url,'type'=>$type,'slug'=>$slug,'name'=>(string)($item['name']??$slug),'version'=>$version];
+                    $normalized=self::normalize_inventory_item($item,$type,$url);
+                    if ($normalized!==null) $out[]=$normalized;
                 }
             }
         }
@@ -811,7 +820,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.9</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.10</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
