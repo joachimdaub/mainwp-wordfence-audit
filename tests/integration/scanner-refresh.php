@@ -71,6 +71,6 @@ update_option(MWA_Audit::NEXT_ATTEMPT,0,false);
 $status=$run();
 mwa_scan_assert($status==='api_error','Unmatched scanner feed rejects cache replacement');
 mwa_scan_assert(file_get_contents($path)===$before,'Zero matches cannot erase cached findings');
-mwa_scan_assert($requests===4,'Missing inventory fails before HTTP download');
+mwa_scan_assert($requests===5,'Both empty-inventory and zero-match checks preserve cache after intercepted HTTP requests');
 remove_filter('pre_http_request',$mock,10);
 WP_CLI::success('Scanner HTTP-to-cache smoke test passed');
