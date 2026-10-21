@@ -287,3 +287,9 @@ The WordPress workflow now runs `tests/integration/notification-cron.php` with a
 ### Notification failure and ignored-finding regressions
 
 The WordPress notification integration fixture now also tests failed `pre_wp_mail` delivery, preserving the known-finding baseline so a subsequent successful attempt can retry without duplication. It verifies that ignored vulnerability IDs do not enter the confirmed-notification baseline or trigger an email, and dispatches the registered WordPress cron action with `do_action`. This validates hook wiring within a WordPress request, **not** the separate HTTP spawning or timing behavior of the WP-Cron scheduler.
+
+## Cache filesystem regression coverage (v0.5.11)
+
+Legacy cache migration now explicitly refuses symbolic links at both the old index and destination index, and private cache directory setup rejects a symlink at its selected directory path. Regression tests cover both symlink conditions as well as a nonexistent, non-writable destination parent: the existing legacy cache must remain intact.
+
+These are filesystem-level regression tests, not proof that a hosting-specific path is inaccessible through HTTP. Before deploying, verify the configured cache directory is outside the server's actual public document root, is writable by PHP, and is not exposed through an alias or other web-server mapping. Testing symlinked ancestor directories and alternative webroots remains part of the hosting review.
