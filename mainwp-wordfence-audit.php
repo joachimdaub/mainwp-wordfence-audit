@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.13
+ * Version: 0.5.14
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -836,7 +836,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.13</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.14</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -922,6 +922,33 @@ final class MWA_Audit {
         echo '<p><strong>Last scanner job:</strong> '.esc_html(is_array($scan_job)&&isset($scan_job['time'])?wp_date('Y-m-d H:i:s T',$scan_job['time']).' — '.($scan_job['status']??'unknown'):'Not run').'</p>';
         echo '<p><strong>Last severity job:</strong> '.esc_html(is_array($severity_job)&&isset($severity_job['time'])?wp_date('Y-m-d H:i:s T',$severity_job['time']).' — '.($severity_job['status']??'unknown'):'Not run').'</p>';
         echo '<p><strong>MainWP inventory:</strong> '.esc_html((string)count($inventory)).' installed items in the locally synced inventory.</p>';
+
+        // Local-only diagnostics: no API requests, remote sync, or cache writes.
+        $inventory_keys=[];
+        foreach ($inventory as $item) $inventory_keys[$item['type'].'/'.strtolower($item['slug'])]=true;
+        $cached_software=0; $cached_vulnerabilities=0; $overlap_software=0; $overlap_vulnerabilities=0;
+        foreach ($idx as $cache_key=>$entries) {
+            if (!is_array($entries)) continue;
+            $cached_software++;
+            $count=count($entries);
+            $cached_vulnerabilities+=$count;
+            if (isset($inventory_keys[$cache_key])) {
+                $overlap_software++;
+                $overlap_vulnerabilities+=$count;
+            }
+        }
+        echo '<p><strong>Local match diagnostics:</strong> '.
+            esc_html((string)count($inventory_keys)).' unique inventory slugs; '.
+            esc_html((string)$cached_software).' cached software slugs; '.
+            esc_html((string)$cached_vulnerabilities).' cached vulnerability records; '.
+            esc_html((string)$overlap_software).' overlapping slugs; '.
+            esc_html((string)$overlap_vulnerabilities).' overlapping vulnerability records.</p>';
+        if ($cached_vulnerabilities===0 && $inventory_keys) {
+            echo '<p><strong>Warning:</strong> Local vulnerability cache has no entries. Zero findings cannot establish safety; review scanner matching before another refresh.</p>';
+        } elseif ($cached_vulnerabilities>0 && $overlap_vulnerabilities===0) {
+            echo '<p><strong>Warning:</strong> Cached vulnerability slugs do not overlap the current MainWP inventory. Check slug normalization and inventory selection.</p>';
+        }
+
         echo '<p><strong>Wordfence feed:</strong> '.($when?esc_html(wp_date('Y-m-d H:i:s T',$when)):'Not yet downloaded').'</p>';
         echo '<p><strong>API key:</strong> '.($key_present?'Configured (not validated)':'Missing').' · <a href="'.esc_url(add_query_arg('mwa_tab','settings',$base)).'">API settings</a></p>';
         echo '<p><strong>Next Wordfence request:</strong> '.($cooldown?esc_html(wp_date('Y-m-d H:i:s T',$next)).' ('.esc_html(human_time_diff(time(),$next)).' remaining)':'Available now').'</p>';
