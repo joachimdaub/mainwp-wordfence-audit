@@ -32,4 +32,22 @@ if (!function_exists('wp_schedule_single_event')) {
         return true;
     }
 }
+$GLOBALS['mwa_test_http_response']=['code'=>200,'headers'=>[]];
+$GLOBALS['mwa_test_http_requests']=[];
+if (!function_exists('wp_remote_get')) {
+    function wp_remote_get($url,$args=[]) {
+        $GLOBALS['mwa_test_http_requests'][]=['url'=>$url,'args'=>$args];
+        $result=$GLOBALS['mwa_test_http_response'];
+        if (!($result instanceof WP_Error) && isset($args['filename']) && array_key_exists('body',$result)) {
+            file_put_contents($args['filename'],$result['body']);
+        }
+        return $result;
+    }
+}
+if (!function_exists('wp_remote_retrieve_response_code')) {
+    function wp_remote_retrieve_response_code($response) { return $response['code']??0; }
+}
+if (!function_exists('wp_remote_retrieve_header')) {
+    function wp_remote_retrieve_header($response,$name) { return $response['headers'][$name]??''; }
+}
 require_once dirname(__DIR__).'/mainwp-wordfence-audit.php';
