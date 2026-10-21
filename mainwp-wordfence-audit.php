@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.11
+ * Version: 0.5.12
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -400,6 +400,13 @@ final class MWA_Audit {
         update_option(self::ERROR_OPTION, sanitize_text_field($message), false);
         self::redirect('api_error');
     }
+    private static function create_feed_temp_file($name) {
+        // tempnam() is a PHP function. wp_tempnam() is not a WordPress Core API.
+        $directory=get_temp_dir();
+        if (!is_string($directory) || !is_dir($directory) || !is_writable($directory)) return false;
+        $path=@tempnam($directory,'mwa-');
+        return is_string($path) ? $path : false;
+    }
     private static function download_feed($endpoint, $key, $tmp, $label) {
         $res=wp_remote_get($endpoint,[
             'timeout'=>180,'redirection'=>0,
@@ -436,7 +443,7 @@ final class MWA_Audit {
         // Stream directly to disk; WordPress must never buffer the full feed.
         $dir = self::storage_dir();
         if (is_wp_error($dir)) self::feed_error('Cache directory unavailable: '.$dir->get_error_code());
-        $tmp = wp_tempnam('mwa-wordfence-feed.json');
+        $tmp = self::create_feed_temp_file('mwa-wordfence-feed.json');
         if (!$tmp) self::feed_error('Could not create temporary download file.');
         self::download_feed(self::ENDPOINT,$key,$tmp,'Wordfence');
         // Extract only the installed software's vulnerabilities, not the entire feed.
@@ -497,7 +504,7 @@ final class MWA_Audit {
         update_option(self::NEXT_ATTEMPT,time()+self::MIN_INTERVAL,false);
         $dir=self::storage_dir();
         if (is_wp_error($dir)) self::feed_error('Cache directory unavailable: '.$dir->get_error_code());
-        $tmp=wp_tempnam('mwa-wordfence-production.json');
+        $tmp=self::create_feed_temp_file('mwa-wordfence-production.json');
         if (!$tmp) self::feed_error('Could not create a temporary file.');
         self::download_feed(self::PRODUCTION_ENDPOINT,$key,$tmp,'Wordfence production feed');
         $wanted=array_fill_keys(array_keys($old),true);
@@ -822,7 +829,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.11</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.12</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
