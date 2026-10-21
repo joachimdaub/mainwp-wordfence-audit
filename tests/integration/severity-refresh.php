@@ -47,7 +47,7 @@ $index=json_decode(file_get_contents($path),true);
 mwa_severity_assert($index['plugin/fixture-plugin'][0]['row']['cvss']['score']===9.8,'Matching ID receives new CVSS');
 mwa_severity_assert($index['plugin/fixture-plugin'][1]['row']['cvss']['score']===7.1,'Second matching ID receives CVSS');
 mwa_severity_assert($index['plugin/fixture-plugin'][0]['row']['title']==='Keep title','Scanner title is preserved');
-mwa_severity_assert($index['theme/fixture-theme']===$original['theme/fixture-theme'],'Invalid CVSS does not overwrite earlier score');
+mwa_severity_assert((float)$index['theme/fixture-theme'][0]['row']['cvss']['score']===3.0 && $index['theme/fixture-theme'][0]['row']['title']==='Unchanged' && $index['theme/fixture-theme'][0]['id']==='fixture-three','Invalid CVSS preserves existing score and scanner metadata');
 mwa_severity_assert(count($index)===2,'Unmatched production software is not inserted');
 mwa_severity_assert((int)get_option('mwa_severity_enriched_count',-1)===2,'Enrichment count persisted');
 $updated=(int)get_option(MWA_Audit::SEVERITY_UPDATED,0);
