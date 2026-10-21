@@ -52,5 +52,7 @@ jobs:
         run: php /tmp/wp-cli.phar eval-file "$GITHUB_WORKSPACE/tests/integration/scanner-refresh.php" --path=/tmp/mwa-wp
       - name: Test production CVSS enrichment
         run: php /tmp/wp-cli.phar eval-file "$GITHUB_WORKSPACE/tests/integration/severity-refresh.php" --path=/tmp/mwa-wp
+      - name: Test notification cron baseline and deduplication
+        run: php /tmp/wp-cli.phar eval-file "$GITHUB_WORKSPACE/tests/integration/notification-cron.php" --path=/tmp/mwa-wp
       - name: Deactivate plugin
         run: php /tmp/wp-cli.phar plugin deactivate mainwp-wordfence-audit --path=/tmp/mwa-wp
