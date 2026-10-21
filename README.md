@@ -217,3 +217,9 @@ Added isolated PHPUnit coverage for the Scanner-to-Severity transition, successf
 ## Combined WP-Cron event tests
 
 The isolated test environment now records simulated `wp_schedule_single_event()` calls. Integration-style tests exercise the actual `combined_severity()` and `combined_scanner()` entry points without external traffic: active cooldown rescheduling, scheduling failure reporting, and missing API key handling. No Wordfence API calls are made in these scenarios. Full WordPress and remote-response integration tests remain pending.
+
+## Mocked Wordfence HTTP tests (v0.5.4)
+
+Both Wordfence feeds now share a single streamed-download helper. PHPUnit uses a local mock of WordPress HTTP functions to verify HTTP 200, HTTP 429 with `Retry-After`, HTTP 500, transport errors and production-endpoint throttling. Failed downloads must remove their temporary files and record an error; the tests make no live API requests.
+
+Malformed JSON rejection is covered by the separate streaming parser tests. An end-to-end test that verifies the persistent vulnerability index remains unchanged after feed errors, and a successful CVSS enrichment test, are still pending. Review GitHub Actions results before treating this version as validated.
