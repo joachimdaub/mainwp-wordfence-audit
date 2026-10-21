@@ -263,3 +263,7 @@ Wordfence advisory titles displayed in active or ignored findings are now consis
 GitHub Actions now runs a separate **WordPress integration smoke test** on pushes to `main`, pull requests and manual dispatch. It installs a disposable WordPress instance with MySQL, activates the plugin through WP-CLI and checks registered admin-post handlers, all three recurring cron hooks, role capabilities for an administrator versus a subscriber, and clearing recurring cron events during deactivation. No Wordfence API credentials are provided, and no customer sites are contacted.
 
 This is intentionally a **WordPress-only smoke test**, not yet a MainWP integration or live Wordfence refresh test. MainWP inventory access, filesystem migration on real hosting, email delivery and cron execution with remote responses remain open. Review the new GitHub Actions workflow status before claiming the smoke test passes.
+
+## MainWP inventory regression tests (v0.5.10)
+
+MainWP plugin and theme inventory entries are now normalized through a dedicated validator. PHPUnit covers directory-based plugin slugs, theme slugs, invalid field types, path-like invalid slugs, unsupported software types, and the rule that a display name is not used to guess a slug. The actual WordPress smoke test also asserts that the plugin handles a missing MainWP Dashboard without a fatal error. These do not yet test MainWP's real database shape; that requires a separate MainWP-enabled integration environment.
