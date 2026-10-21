@@ -70,4 +70,13 @@ final class CacheMigrationTest extends TestCase {
         $this->assertSame('{"existing":[]}',file_get_contents($real));
     }
 
+    public function testUnwritableDestinationPathPreservesLegacyCache(): void {
+        $source=$this->dir.'/old.json';
+        file_put_contents($source,'{"valid":[]}');
+        $target=$this->dir.'/missing-directory/new.json';
+        $this->assertFalse($this->migrate($source,$target));
+        $this->assertSame('{"valid":[]}',file_get_contents($source));
+        $this->assertFileDoesNotExist($target);
+    }
+
 }
