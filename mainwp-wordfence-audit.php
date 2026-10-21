@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.3
+ * Version: 0.5.4
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -392,6 +392,28 @@ final class MWA_Audit {
         update_option(self::ERROR_OPTION, sanitize_text_field($message), false);
         self::redirect('api_error');
     }
+    private static function download_feed($endpoint, $key, $tmp, $label) {
+        $res=wp_remote_get($endpoint,[
+            'timeout'=>180,'redirection'=>0,
+            'headers'=>['Authorization'=>'Bearer '.$key,'Accept'=>'application/json'],
+            'stream'=>true,'filename'=>$tmp,
+        ]);
+        if (is_wp_error($res)) {
+            @unlink($tmp);
+            self::feed_error('WordPress HTTP error: '.$res->get_error_code());
+            return;
+        }
+        $code=(int)wp_remote_retrieve_response_code($res);
+        if ($code===429) {
+            $retry=wp_remote_retrieve_header($res,'retry-after');
+            $seconds=is_numeric($retry) ? max(0,(int)$retry) : (is_string($retry) && strtotime($retry) ? max(0,strtotime($retry)-time()) : 0);
+            update_option(self::NEXT_ATTEMPT,time()+max(3600,$seconds),false);
+        }
+        if ($code!==200) {
+            @unlink($tmp);
+            self::feed_error($label.' HTTP '.$code.($code===429?' (rate limit reached)':''));
+        }
+    }
     public static function refresh($scheduled=false) {
         if (!$scheduled) {
             if (!self::allowed()) wp_die('Forbidden', '', ['response'=>403]);
@@ -408,25 +430,7 @@ final class MWA_Audit {
         if (is_wp_error($dir)) self::feed_error('Cache directory unavailable: '.$dir->get_error_code());
         $tmp = wp_tempnam('mwa-wordfence-feed.json');
         if (!$tmp) self::feed_error('Could not create temporary download file.');
-        $res = wp_remote_get(self::ENDPOINT, [
-            'timeout'=>180, 'redirection'=>0,
-            'headers'=>['Authorization'=>'Bearer '.$key,'Accept'=>'application/json'],
-            'stream'=>true, 'filename'=>$tmp,
-        ]);
-        if (is_wp_error($res)) {
-            @unlink($tmp);
-            self::feed_error('WordPress HTTP error: '.$res->get_error_code());
-        }
-        $http_code = (int) wp_remote_retrieve_response_code($res);
-        if ($http_code === 429) {
-            $retry = wp_remote_retrieve_header($res, 'retry-after');
-            $seconds = is_numeric($retry) ? max(0,(int)$retry) : (is_string($retry) && strtotime($retry) ? max(0,strtotime($retry)-time()) : 0);
-            update_option(self::NEXT_ATTEMPT, time() + max(3600,$seconds), false);
-        }
-        if ($http_code !== 200) {
-            @unlink($tmp);
-            self::feed_error('Wordfence HTTP '.$http_code.($http_code===429?' (rate limit reached)':''));
-        }
+        self::download_feed(self::ENDPOINT,$key,$tmp,'Wordfence');
         // Extract only the installed software's vulnerabilities, not the entire feed.
         list($inventory,) = self::inventory();
         $wanted = [];
@@ -487,24 +491,7 @@ final class MWA_Audit {
         if (is_wp_error($dir)) self::feed_error('Cache directory unavailable: '.$dir->get_error_code());
         $tmp=wp_tempnam('mwa-wordfence-production.json');
         if (!$tmp) self::feed_error('Could not create a temporary file.');
-        $res=wp_remote_get(self::PRODUCTION_ENDPOINT,[
-            'timeout'=>180,'redirection'=>0,'stream'=>true,'filename'=>$tmp,
-            'headers'=>['Authorization'=>'Bearer '.$key,'Accept'=>'application/json'],
-        ]);
-        if (is_wp_error($res)) {
-            @unlink($tmp);
-            self::feed_error('WordPress HTTP error: '.$res->get_error_code());
-        }
-        $code=(int)wp_remote_retrieve_response_code($res);
-        if ($code===429) {
-            $retry=wp_remote_retrieve_header($res,'retry-after');
-            $seconds=is_numeric($retry)?max(0,(int)$retry):(is_string($retry)&&strtotime($retry)?max(0,strtotime($retry)-time()):0);
-            update_option(self::NEXT_ATTEMPT,time()+max(3600,$seconds),false);
-        }
-        if ($code!==200) {
-            @unlink($tmp);
-            self::feed_error('Wordfence production feed HTTP '.$code);
-        }
+        self::download_feed(self::PRODUCTION_ENDPOINT,$key,$tmp,'Wordfence production feed');
         $wanted=array_fill_keys(array_keys($old),true);
         $production=self::stream_index($tmp,$wanted);
         @unlink($tmp);
@@ -773,7 +760,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.3</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.4</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
