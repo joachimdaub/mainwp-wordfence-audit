@@ -16,6 +16,12 @@ function mwa_smoke_assert($condition, $description) {
 
 mwa_smoke_assert(is_plugin_active('mainwp-wordfence-audit/mainwp-wordfence-audit.php'), 'Plugin activates successfully');
 mwa_smoke_assert(class_exists('MWA_Audit'), 'Audit class loads');
+mwa_smoke_assert(!class_exists('\\MainWP\\Dashboard\\MainWP_DB'), 'MainWP is not installed in the smoke environment');
+$inventory_method=new ReflectionMethod('MWA_Audit','inventory');
+$inventory_method->setAccessible(true);
+list($inventory,$inventory_error)=$inventory_method->invoke(null);
+mwa_smoke_assert($inventory===[] && is_string($inventory_error) && $inventory_error!=='', 'Missing MainWP is handled without a fatal error');
+
 
 foreach ([
     MWA_Audit::CRON_SCANNER,
