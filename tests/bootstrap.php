@@ -53,4 +53,9 @@ if (!function_exists('wp_remote_retrieve_response_code')) {
 if (!function_exists('wp_remote_retrieve_header')) {
     function wp_remote_retrieve_header($response,$name) { return $response['headers'][$name]??''; }
 }
+if (!function_exists('wp_generate_password')) {
+    function wp_generate_password($length=12,$special_chars=false,$extra_special_chars=false) {
+        return substr(bin2hex(random_bytes(16)),0,$length);
+    }
+}
 require_once dirname(__DIR__).'/mainwp-wordfence-audit.php';
