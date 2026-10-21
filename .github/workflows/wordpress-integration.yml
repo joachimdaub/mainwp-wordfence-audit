@@ -1,0 +1,52 @@
+name: WordPress integration smoke test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wordpress:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wordpress_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mysqli
+          coverage: none
+      - name: Install WP-CLI
+        run: |
+          curl --fail --location --silent --show-error https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar -o /tmp/wp-cli.phar
+          php /tmp/wp-cli.phar --info
+      - name: Set up WordPress
+        run: |
+          mkdir -p /tmp/mwa-wp
+          php /tmp/wp-cli.phar core download --path=/tmp/mwa-wp --quiet
+          php /tmp/wp-cli.phar config create --path=/tmp/mwa-wp --dbname=wordpress_test --dbuser=root --dbpass=root --dbhost=127.0.0.1 --skip-check --quiet
+          php /tmp/wp-cli.phar core install --path=/tmp/mwa-wp --url=http://localhost --title="MWA CI" --admin_user=mwaadmin --admin_password=testing-only-not-a-secret --admin_email=admin@example.test --skip-email --quiet
+          mkdir -p /tmp/mwa-wp/wp-content/plugins/mainwp-wordfence-audit
+          cp mainwp-wordfence-audit.php /tmp/mwa-wp/wp-content/plugins/mainwp-wordfence-audit/
+          php /tmp/wp-cli.phar plugin activate mainwp-wordfence-audit --path=/tmp/mwa-wp
+      - name: Run WordPress integration assertions
+        run: php /tmp/wp-cli.phar eval-file tests/integration/wordpress-smoke.php --path=/tmp/mwa-wp
+      - name: Deactivate plugin
+        run: php /tmp/wp-cli.phar plugin deactivate mainwp-wordfence-audit --path=/tmp/mwa-wp
