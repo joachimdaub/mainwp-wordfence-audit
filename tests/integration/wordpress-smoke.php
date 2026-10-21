@@ -3,6 +3,10 @@
  * Run with WP-CLI eval-file against a temporary real WordPress installation.
  * No MainWP instance, API key, mail transport, or Wordfence network is required.
  */
+if (!function_exists('is_plugin_active')) {
+    require_once ABSPATH.'wp-admin/includes/plugin.php';
+}
+
 function mwa_smoke_assert($condition, $description) {
     if (!$condition) {
         WP_CLI::error($description);
