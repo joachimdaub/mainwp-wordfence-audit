@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.14
+ * Version: 0.5.15
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -16,6 +16,7 @@ final class MWA_Audit {
     const CACHE = 'mwa_wordfence_feed_v1';
     const INDEX_FILE = 'mainwp-wordfence-audit-index.json';
     const LAST = 'mwa_wordfence_feed_updated';
+    const SCANNER_DIAGNOSTICS = 'mwa_scanner_match_diagnostics_v1';
     const ENDPOINT = 'https://www.wordfence.com/api/intelligence/v3/vulnerabilities/scanner';
     const PRODUCTION_ENDPOINT = 'https://www.wordfence.com/api/intelligence/v3/vulnerabilities/production';
     const SEVERITY_UPDATED = 'mwa_severity_updated';
@@ -457,6 +458,16 @@ final class MWA_Audit {
         $index = self::stream_index($tmp, $wanted);
         @unlink($tmp);
         if (is_wp_error($index)) self::feed_error('Feed validation failed: '.$index->get_error_code());
+        update_option(self::SCANNER_DIAGNOSTICS,[
+            'time'=>time(),
+            'inventory_items'=>count($inventory),
+            'inventory_slugs'=>count($wanted),
+            'feed_vulnerabilities'=>(int)$index['seen'],
+            'software_records'=>(int)$index['software_records'],
+            'valid_software_slugs'=>(int)$index['valid_slugs'],
+            'matched_records'=>(int)$index['matched_records'],
+            'matched_slugs'=>count($index['matches']),
+        ],false);
         if (!$index['seen']) self::feed_error('The feed contained no vulnerability entries.');
         // Fail closed if an unexpectedly empty match would erase existing findings.
         // A zero-match scanner result needs a separate explicit verification.
@@ -616,7 +627,7 @@ final class MWA_Audit {
     private static function stream_index($path, $wanted) {
         $fp = @fopen($path,'rb');
         if (!$fp) return new WP_Error('file_open_failed');
-        $matches=[]; $seen=0; $state='start'; $key=''; $value='';
+        $matches=[]; $seen=0; $software_records=0; $valid_slugs=0; $matched_records=0; $state='start'; $key=''; $value='';
         $token=''; $in_string=false; $escaped=false; $depth=0;
         $error=null;
         // Buffered single-character reader: memory stays bounded.
@@ -681,8 +692,12 @@ final class MWA_Audit {
                     $seen++;
                     foreach ($row['software']??[] as $sw) {
                         if (!is_array($sw)) continue;
+                        $software_records++;
                         $type=$sw['type']??''; $slug=$sw['slug']??'';
-                        if (!is_string($type) || !is_string($slug) || !isset($wanted[$type.'/'.strtolower($slug)])) continue;
+                        if (!is_string($type) || !is_string($slug) || !in_array($type,['plugin','theme'],true) || $slug==='') continue;
+                        $valid_slugs++;
+                        if (!isset($wanted[$type.'/'.strtolower($slug)])) continue;
+                        $matched_records++;
                         $matches[$type.'/'.strtolower($slug)][]=['id'=>$key,'row'=>['title'=>(string)($row['title']??$key),'severity'=>$row['severity']??null,'cvss'=>$row['cvss']??null,'cvss3'=>$row['cvss3']??null,'cvss_score'=>$row['cvss_score']??null],'software'=>$sw];
                     }
                     $value=''; $state='separator';
@@ -698,7 +713,7 @@ final class MWA_Audit {
         }
         fclose($fp);
         if ($error || $state!=='done') return new WP_Error($error?:'incomplete_json');
-        return ['seen'=>$seen,'matches'=>$matches];
+        return ['seen'=>$seen,'matches'=>$matches,'software_records'=>$software_records,'valid_slugs'=>$valid_slugs,'matched_records'=>$matched_records];
     }
     private static function cached_index() {
         $dir=self::storage_dir();
@@ -836,7 +851,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.14</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.15</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -949,6 +964,16 @@ final class MWA_Audit {
             echo '<p><strong>Warning:</strong> Cached vulnerability slugs do not overlap the current MainWP inventory. Check slug normalization and inventory selection.</p>';
         }
 
+        $scan_diag=get_option(self::SCANNER_DIAGNOSTICS,[]);
+        if (is_array($scan_diag) && !empty($scan_diag['time'])) {
+            $diag_labels=['inventory_items'=>'inventory items','inventory_slugs'=>'inventory slugs',
+                'feed_vulnerabilities'=>'feed vulnerabilities','software_records'=>'software records',
+                'valid_software_slugs'=>'valid software slugs','matched_records'=>'matched records',
+                'matched_slugs'=>'matched slugs'];
+            $diag_parts=[];
+            foreach ($diag_labels as $key=>$label) $diag_parts[]=$label.': '.(int)($scan_diag[$key]??0);
+            echo '<p><strong>Last scanner matching attempt:</strong> '.esc_html(wp_date('Y-m-d H:i:s T',$scan_diag['time']).' — '.implode('; ',$diag_parts)).'</p>';
+        }
         echo '<p><strong>Wordfence feed:</strong> '.($when?esc_html(wp_date('Y-m-d H:i:s T',$when)):'Not yet downloaded').'</p>';
         echo '<p><strong>API key:</strong> '.($key_present?'Configured (not validated)':'Missing').' · <a href="'.esc_url(add_query_arg('mwa_tab','settings',$base)).'">API settings</a></p>';
         echo '<p><strong>Next Wordfence request:</strong> '.($cooldown?esc_html(wp_date('Y-m-d H:i:s T',$next)).' ('.esc_html(human_time_diff(time(),$next)).' remaining)':'Available now').'</p>';
