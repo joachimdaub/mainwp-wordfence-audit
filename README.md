@@ -301,3 +301,7 @@ Both feed downloads previously called `wp_tempnam()`, which is not a WordPress C
 ## Local cache-to-inventory diagnostics (v0.5.14)
 
 The dashboard's Data sources section displays counts for unique MainWP inventory slugs, cached software slugs, cached vulnerability records, overlapping slugs, and overlapping vulnerability records. It flags a completely empty cache or a nonempty cache with no inventory overlap. The diagnostics only inspect inventory and the existing local cache while rendering; they do not contact Wordfence, trigger a MainWP remote sync, or replace cache content. These counts distinguish an empty matching index from version-range filtering; they do not prove coverage or vulnerability-free sites.
+
+## Scanner matching diagnostics (v0.5.15)
+
+On each successfully parsed scanner feed, the plugin persists aggregate diagnostic counts for inventory items and unique slugs, feed vulnerability entries, software records, valid type/slug pairs, matched records, and matched software slugs. These counts appear under **Data sources** as **Last scanner matching attempt** and remain available even if a zero-match attempt is rejected. No raw feed rows, API keys, or site identifiers are stored in this diagnostic option. The existing cache is preserved when zero matches are found. This adds no additional API request; diagnostics are collected on the next normal scanner fetch. Malformed feed downloads are not treated as successfully parsed and therefore do not replace the previous diagnostic counts.
