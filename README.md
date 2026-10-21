@@ -267,3 +267,7 @@ This is intentionally a **WordPress-only smoke test**, not yet a MainWP integrat
 ## MainWP inventory regression tests (v0.5.10)
 
 MainWP plugin and theme inventory entries are now normalized through a dedicated validator. PHPUnit covers directory-based plugin slugs, theme slugs, invalid field types, path-like invalid slugs, unsupported software types, and the rule that a display name is not used to guess a slug. The actual WordPress smoke test also asserts that the plugin handles a missing MainWP Dashboard without a fatal error. These do not yet test MainWP's real database shape; that requires a separate MainWP-enabled integration environment.
+
+## MainWP database-adapter tests
+
+`MainWPInventoryAdapterTest` exercises the inventory-reading method with a simulated `MainWP_DB` implementation. It covers multiple websites, JSON and serialized inventories, website-option fallback, malformed rows, and background execution without a configured inventory user. This is an interface-level integration test, **not** a test against a real MainWP Dashboard database. A separate MainWP-enabled staging installation is still required before the beta release.
