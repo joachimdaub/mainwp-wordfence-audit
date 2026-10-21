@@ -297,3 +297,7 @@ These are filesystem-level regression tests, not proof that a hosting-specific p
 ## Runtime fix: temporary feed files (v0.5.12)
 
 Both feed downloads previously called `wp_tempnam()`, which is not a WordPress Core function. In production cron execution this caused a fatal `undefined function` error before scanner or severity downloads could start. Both endpoints now use PHP `tempnam()` inside the directory returned by WordPress `get_temp_dir()`. The WordPress integration test verifies that the helper creates a real temporary file. Deploy to a staging environment first and verify scheduled refresh status and private cache write permissions before using on a production dashboard.
+
+## Local cache-to-inventory diagnostics (v0.5.14)
+
+The dashboard's Data sources section displays counts for unique MainWP inventory slugs, cached software slugs, cached vulnerability records, overlapping slugs, and overlapping vulnerability records. It flags a completely empty cache or a nonempty cache with no inventory overlap. The diagnostics only inspect inventory and the existing local cache while rendering; they do not contact Wordfence, trigger a MainWP remote sync, or replace cache content. These counts distinguish an empty matching index from version-range filtering; they do not prove coverage or vulnerability-free sites.
