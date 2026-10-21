@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.5
+ * Version: 0.5.6
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -534,15 +534,37 @@ final class MWA_Audit {
         unset($entries);
         return [$index,$enriched];
     }
+    private static function private_cache_dir() {
+        // Parent of the WordPress application directory, not wp-content/uploads.
+        // Set MWA_PRIVATE_CACHE_DIR in wp-config.php for custom deployments.
+        if (defined('MWA_PRIVATE_CACHE_DIR') && is_string(MWA_PRIVATE_CACHE_DIR) && MWA_PRIVATE_CACHE_DIR!=='') {
+            return rtrim(MWA_PRIVATE_CACHE_DIR, '/\\');
+        }
+        return dirname(rtrim(ABSPATH, '/\\')).'/mainwp-wordfence-audit-private';
+    }
     private static function storage_dir() {
-        $uploads = wp_get_upload_dir();
-        if (!empty($uploads['error']) || empty($uploads['basedir'])) return new WP_Error('uploads_unavailable');
-        $dir = trailingslashit($uploads['basedir']).'mainwp-wordfence-audit';
-        if (!is_dir($dir) && !wp_mkdir_p($dir)) return new WP_Error('mkdir_failed');
-        if (!is_writable($dir)) return new WP_Error('directory_not_writable');
-        // Prevent direct HTTP access on Apache; never store secrets in this directory.
-        if (!file_exists($dir.'/index.php')) @file_put_contents($dir.'/index.php', '<?php // Silence is golden.');
-        if (!file_exists($dir.'/.htaccess')) @file_put_contents($dir.'/.htaccess', "Require all denied\nDeny from all\n");
+        $dir=self::private_cache_dir();
+        $root=realpath(ABSPATH);
+        $parent=realpath(dirname($dir));
+        // Prevent accidental placement inside the WordPress document root.
+        if (!$root || !$parent || ($parent===$root || strpos($parent,$root.DIRECTORY_SEPARATOR)===0)) return new WP_Error('private_cache_path_unsafe');
+        if (!is_dir($dir) && !wp_mkdir_p($dir)) return new WP_Error('private_cache_not_writable');
+        $actual=realpath($dir);
+        if (!$actual || $actual===$root || strpos($actual,$root.DIRECTORY_SEPARATOR)===0) return new WP_Error('private_cache_path_unsafe');
+        if (!is_writable($dir)) return new WP_Error('private_cache_not_writable');
+        // Migrate the old uploads cache only after the safe directory is available.
+        $uploads=wp_get_upload_dir();
+        if (is_array($uploads) && empty($uploads['error']) && !empty($uploads['basedir'])) {
+            $legacy=trailingslashit($uploads['basedir']).'mainwp-wordfence-audit/'.self::INDEX_FILE;
+            $target=trailingslashit($dir).self::INDEX_FILE;
+            if (is_file($legacy) && !is_file($target)) {
+                $raw=@file_get_contents($legacy);
+                if (is_string($raw) && is_array(json_decode($raw,true))) {
+                    if (@file_put_contents($target,$raw,LOCK_EX)!==false) @chmod($target,0600);
+                }
+            }
+            if (is_file($legacy) && is_file($target)) @unlink($legacy);
+        }
         return $dir;
     }
     /**
@@ -638,9 +660,9 @@ final class MWA_Audit {
         return ['seen'=>$seen,'matches'=>$matches];
     }
     private static function cached_index() {
-        $uploads=wp_get_upload_dir();
-        if (!empty($uploads['error']) || empty($uploads['basedir'])) return [];
-        $path=trailingslashit($uploads['basedir']).'mainwp-wordfence-audit/'.self::INDEX_FILE;
+        $dir=self::storage_dir();
+        if (is_wp_error($dir)) return [];
+        $path=trailingslashit($dir).self::INDEX_FILE;
         if (!is_readable($path)) return [];
         $raw=@file_get_contents($path);
         $decoded=is_string($raw)?json_decode($raw,true):null;
@@ -764,7 +786,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.5</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.6</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
