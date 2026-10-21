@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.10
+ * Version: 0.5.11
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -551,7 +551,7 @@ final class MWA_Audit {
         return dirname(rtrim(ABSPATH, '/\\')).'/mainwp-wordfence-audit-private';
     }
     private static function migrate_legacy_cache($legacy, $target) {
-        if (!is_file($legacy) || is_link($legacy)) return false;
+        if (!is_file($legacy) || is_link($legacy) || is_link($target)) return false;
         if (is_file($target)) {
             $existing=@file_get_contents($target);
             if (!is_string($existing) || !is_array(json_decode($existing,true))) return false;
@@ -575,11 +575,13 @@ final class MWA_Audit {
     }
     private static function storage_dir() {
         $dir=self::private_cache_dir();
+        if (is_link($dir)) return new WP_Error('private_cache_path_unsafe');
         $root=realpath(ABSPATH);
         $parent=realpath(dirname($dir));
         // Prevent accidental placement inside the WordPress document root.
         if (!$root || !$parent || ($parent===$root || strpos($parent,$root.DIRECTORY_SEPARATOR)===0)) return new WP_Error('private_cache_path_unsafe');
         if (!is_dir($dir) && !wp_mkdir_p($dir)) return new WP_Error('private_cache_not_writable');
+        if (is_link($dir)) return new WP_Error('private_cache_path_unsafe');
         $actual=realpath($dir);
         if (!$actual || $actual===$root || strpos($actual,$root.DIRECTORY_SEPARATOR)===0) return new WP_Error('private_cache_path_unsafe');
         if (!is_writable($dir)) return new WP_Error('private_cache_not_writable');
@@ -820,7 +822,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.10</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.11</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
