@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.15
+ * Version: 0.5.16
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -851,7 +851,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.15</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.16</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -920,6 +920,9 @@ final class MWA_Audit {
         echo '</div>';
         echo '<div style="background:#fff;border:1px solid #c3c4c7;padding:16px 20px;margin:14px 0;max-width:1080px">';
         echo '<h2 style="margin:0 0 12px">Data sources</h2>';
+        if ($last_error!=='') {
+            echo '<p><strong>Last feed error:</strong> '.esc_html($last_error).'</p>';
+        }
         $mail_job=get_option(self::EMAIL_RESULT,[]);
         echo '<p><strong>New-finding email:</strong> '.(get_option(self::EMAIL_ENABLED,true)?'Enabled':'Disabled').' — '.esc_html((string)(get_option(self::EMAIL_RECIPIENT,'')?:get_option('admin_email',''))).'</p>';
         foreach (['scanner','severity'] as $job_type) {
