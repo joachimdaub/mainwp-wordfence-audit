@@ -15,15 +15,16 @@ $mail=function($preempt,$attributes) use (&$sent,&$mail_ok) {
     return $mail_ok;
 };
 add_filter('pre_wp_mail',$mail,10,2);
-$dir=dirname(rtrim(ABSPATH,'/\\')).'/mainwp-wordfence-audit-private';
-if (!is_dir($dir) && !wp_mkdir_p($dir)) WP_CLI::error('Cannot prepare private test cache');
-$path=$dir.'/'.MWA_Audit::INDEX_FILE;
+$save_index=new ReflectionMethod('MWA_Audit','save_cached_index');
+$save_index->setAccessible(true);
+$read_index=new ReflectionMethod('MWA_Audit','cached_index');
+$read_index->setAccessible(true);
 $range=[['from_version'=>'1.0','to_version'=>'2.0','from_inclusive'=>true,'to_inclusive'=>true]];
 $entry=function($id,$title) use ($range) {
     return ['id'=>$id,'row'=>['title'=>$title,'cvss'=>['score'=>8.1]],'software'=>['type'=>'plugin','slug'=>'fixture-plugin','affected_versions'=>$range]];
 };
 $index=['plugin/fixture-plugin'=>[$entry('existing-id','Existing vulnerability')]];
-file_put_contents($path,wp_json_encode($index));
+mwa_notify_assert($save_index->invoke(null,$index),'Fixture persisted in database cache');
 \MainWP\Dashboard\MainWP_DB::$plugins=[['file'=>'fixture-plugin/plugin.php','name'=>'Fixture Plugin','version'=>'1.5']];
 update_option(MWA_Audit::INVENTORY_USER,1,false);
 update_option(MWA_Audit::LAST,time(),false);
@@ -36,7 +37,7 @@ mwa_notify_assert(count($sent)===0,'First run does not send old vulnerabilities'
 MWA_Audit::notify_new_findings();
 mwa_notify_assert(get_option(MWA_Audit::EMAIL_RESULT)['status']==='no_new_findings','Repeated run does not report unchanged vulnerabilities');
 $index['plugin/fixture-plugin'][]=$entry('new-id','New vulnerability');
-file_put_contents($path,wp_json_encode($index));
+mwa_notify_assert($save_index->invoke(null,$index),'Fixture persisted in database cache');
 MWA_Audit::notify_new_findings();
 mwa_notify_assert(get_option(MWA_Audit::EMAIL_RESULT)['status']==='sent','New vulnerability triggers notification');
 mwa_notify_assert(count($sent)===1,'Exactly one email was intercepted');
@@ -45,7 +46,7 @@ MWA_Audit::notify_new_findings();
 mwa_notify_assert(count($sent)===1,'Repeated run does not duplicate notification');
 update_option(MWA_Audit::EMAIL_ENABLED,false,false);
 $index['plugin/fixture-plugin'][]=$entry('disabled-id','While disabled');
-file_put_contents($path,wp_json_encode($index));
+mwa_notify_assert($save_index->invoke(null,$index),'Fixture persisted in database cache');
 $known=get_option(MWA_Audit::KNOWN);
 MWA_Audit::notify_new_findings();
 mwa_notify_assert(get_option(MWA_Audit::EMAIL_RESULT)['status']==='disabled','Disabled notifications skip email');
@@ -68,7 +69,7 @@ mwa_notify_assert(count($sent)===3,'No duplicate after successful retry');
 // Ignore a confirmed new finding before dispatching the registered cron hook.
 $ignored_entry=$entry('ignored-id','Ignored vulnerability');
 $index['plugin/fixture-plugin'][]=$ignored_entry;
-file_put_contents($path,wp_json_encode($index));
+mwa_notify_assert($save_index->invoke(null,$index),'Fixture persisted in database cache');
 $finding_method=new ReflectionMethod('MWA_Audit','finding_key');
 $finding_method->setAccessible(true);
 $finding_id=$finding_method->invoke(null,[
