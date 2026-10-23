@@ -964,9 +964,7 @@ final class MWA_Audit {
         if ($last_error!=='') {
             echo '<p><strong>Last feed error:</strong> '.esc_html($last_error).'</p>';
         }
-        if (strpos($last_error,'private_cache_path_unsafe')!==false) {
-            echo '<p><strong>Private cache configuration required:</strong> The cache directory could not be verified outside the WordPress application directory. Configure <code>MWA_PRIVATE_CACHE_DIR</code> in <code>wp-config.php</code> using an absolute path outside the actual public webroot. Do not disable the safety check or use a public uploads directory.</p>';
-        }
+
         $mail_job=get_option(self::EMAIL_RESULT,[]);
         echo '<p><strong>New-finding email:</strong> '.(get_option(self::EMAIL_ENABLED,true)?'Enabled':'Disabled').' — '.esc_html((string)(get_option(self::EMAIL_RECIPIENT,'')?:get_option('admin_email',''))).'</p>';
         foreach (['scanner','severity'] as $job_type) {
@@ -984,15 +982,7 @@ final class MWA_Audit {
         echo '<p><strong>Last scanner job:</strong> '.esc_html(is_array($scan_job)&&isset($scan_job['time'])?wp_date('Y-m-d H:i:s T',$scan_job['time']).' — '.($scan_job['status']??'unknown'):'Not run').'</p>';
         echo '<p><strong>Last severity job:</strong> '.esc_html(is_array($severity_job)&&isset($severity_job['time'])?wp_date('Y-m-d H:i:s T',$severity_job['time']).' — '.($severity_job['status']??'unknown'):'Not run').'</p>';
         echo '<p><strong>MainWP inventory:</strong> '.esc_html((string)count($inventory)).' installed items in the locally synced inventory.</p>';
-        $cache_probe=self::cache_path_diagnostics();
-        echo '<p><strong>Private cache path check (read-only):</strong> '.esc_html($cache_probe['status']).'</p>';
-        echo '<p><strong>Configured cache path:</strong> <code>'.esc_html($cache_probe['configured']).'</code></p>';
-        echo '<p><strong>Web PHP WordPress root:</strong> <code>'.esc_html($cache_probe['wordpress_root']).'</code></p>';
-        echo '<p><strong>Cache parent (resolved):</strong> <code>'.esc_html($cache_probe['parent']).'</code></p>';
-        echo '<p><strong>Cache path (resolved):</strong> <code>'.esc_html($cache_probe['resolved']).'</code></p>';
-        echo '<p><strong>Cache filesystem checks:</strong> '.esc_html('exists: '.($cache_probe['exists']?'yes':'no').'; writable: '.($cache_probe['writable']?'yes':'no').'; symlink: '.($cache_probe['symlink']?'yes':'no')).'</p>';
-
-
+        echo '<p><strong>Vulnerability storage:</strong> WordPress database table (atomic replacement).</p>';
         // Local-only diagnostics: no API requests, remote sync, or cache writes.
         $inventory_keys=[];
         foreach ($inventory as $item) $inventory_keys[$item['type'].'/'.strtolower($item['slug'])]=true;
