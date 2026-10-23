@@ -309,3 +309,11 @@ On each successfully parsed scanner feed, the plugin persists aggregate diagnost
 ## Read-only cache path diagnostics (v0.5.18)
 
 The administrator-only Data sources panel now reports the configured cache path, resolved WordPress root, resolved cache parent/directory, existence, PHP writability, symlink status, and a read-only path validation result. This inspection does not invoke storage_dir(), create directories, migrate files, or make external HTTP requests. Existing last feed errors remain visible until a subsequent feed operation updates or clears them. Confirm that the resolved directory is outside every public webroot or web-server alias before running the scanner.
+
+## Database-backed vulnerability cache (v0.5.19)
+
+The matching vulnerability index is now stored in the dedicated `{prefix}mwa_vulnerability_cache` WordPress table. WordPress creates the table automatically on the next request. Scanner and Production severity imports update one cache row with a single atomic SQL UPSERT after validation; a rejected feed does not replace the prior data. No persistent private cache directory or `MWA_PRIVATE_CACHE_DIR` configuration is required for new installations. Temporary feed downloads still use WordPress's temporary directory and are deleted after parsing.
+
+If the new database row is absent, the plugin attempts to import a nonempty valid JSON cache from the old configured private directory or legacy uploads location without deleting the original file. Existing ignored-finding options and mail baselines are untouched. Do not interpret an empty cache as no known vulnerabilities. A previously overwritten empty JSON cache cannot reconstruct lost matches.
+
+The old path diagnostics are no longer displayed; database diagnostics and the remaining legacy helper code may be removed after the migration compatibility window. A successful staging run and CI confirmation are required before treating this as beta-ready.
