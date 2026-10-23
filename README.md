@@ -305,3 +305,7 @@ The dashboard's Data sources section displays counts for unique MainWP inventory
 ## Scanner matching diagnostics (v0.5.15)
 
 On each successfully parsed scanner feed, the plugin persists aggregate diagnostic counts for inventory items and unique slugs, feed vulnerability entries, software records, valid type/slug pairs, matched records, and matched software slugs. These counts appear under **Data sources** as **Last scanner matching attempt** and remain available even if a zero-match attempt is rejected. No raw feed rows, API keys, or site identifiers are stored in this diagnostic option. The existing cache is preserved when zero matches are found. This adds no additional API request; diagnostics are collected on the next normal scanner fetch. Malformed feed downloads are not treated as successfully parsed and therefore do not replace the previous diagnostic counts.
+
+## Read-only cache path diagnostics (v0.5.18)
+
+The administrator-only Data sources panel now reports the configured cache path, resolved WordPress root, resolved cache parent/directory, existence, PHP writability, symlink status, and a read-only path validation result. This inspection does not invoke storage_dir(), create directories, migrate files, or make external HTTP requests. Existing last feed errors remain visible until a subsequent feed operation updates or clears them. Confirm that the resolved directory is outside every public webroot or web-server alias before running the scanner.
