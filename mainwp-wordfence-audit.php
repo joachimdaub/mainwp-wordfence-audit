@@ -757,13 +757,37 @@ final class MWA_Audit {
         );
         return $wpdb->query($sql)!==false;
     }
+    private static function import_legacy_cache() {
+        // Migration is best-effort and never removes a source file.
+        $paths=[];
+        $private=self::private_cache_dir();
+        $root=realpath(ABSPATH);
+        $resolved=realpath($private);
+        if ($resolved && $root && $resolved!==$root && strpos($resolved,$root.DIRECTORY_SEPARATOR)!==0) {
+            $paths[]=$resolved.'/'.self::INDEX_FILE;
+        }
+        $uploads=wp_get_upload_dir();
+        if (is_array($uploads) && empty($uploads['error']) && !empty($uploads['basedir'])) {
+            $paths[]=trailingslashit($uploads['basedir']).'mainwp-wordfence-audit/'.self::INDEX_FILE;
+        }
+        foreach (array_unique($paths) as $path) {
+            if (!is_file($path) || is_link($path) || !is_readable($path)) continue;
+            $raw=@file_get_contents($path);
+            $index=is_string($raw)?json_decode($raw,true):null;
+            if (!is_array($index) || !$index) continue;
+            if (self::save_cached_index($index)) return $index;
+        }
+        return [];
+    }
     private static function cached_index() {
         global $wpdb;
         if (!self::ensure_cache_table()) return [];
         $table=$wpdb->prefix.'mwa_vulnerability_cache';
         $json=$wpdb->get_var($wpdb->prepare("SELECT payload FROM $table WHERE cache_id=%s",'scanner'));
         $index=is_string($json)?json_decode($json,true):null;
-        return is_array($index)?$index:[];
+        if (is_array($index)) return $index;
+        // Only a missing DB entry (not corrupt DB data) may trigger legacy import.
+        return $json===null ? self::import_legacy_cache() : [];
     }
     private static function range_status($version, $ranges) {
         if (!is_array($ranges) || !$ranges || !is_string($version) || !preg_match('/^\d+(?:\.\d+)*(?:[-.]?(?:alpha|beta|rc)\d*)?$/i',$version)) return 'unknown';
