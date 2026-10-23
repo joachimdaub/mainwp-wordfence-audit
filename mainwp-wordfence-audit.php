@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.17
+ * Version: 0.5.18
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -598,6 +598,33 @@ final class MWA_Audit {
         if (!is_string($saved) || !hash_equals(hash('sha256',$raw),hash('sha256',$saved))) return false;
         return @unlink($legacy);
     }
+    private static function cache_path_diagnostics() {
+        // Read-only mirror of storage_dir path checks; do not create or migrate files.
+        $configured=self::private_cache_dir();
+        $root=realpath(ABSPATH);
+        $parent=realpath(dirname($configured));
+        $actual=realpath($configured);
+        $linked=is_link($configured);
+        $inside=static function($path,$base) {
+            return $path && $base && ($path===$base || strpos($path,$base.DIRECTORY_SEPARATOR)===0);
+        };
+        $status='ok';
+        if ($linked || !$root || !$parent || $inside($parent,$root) || ($actual && $inside($actual,$root))) {
+            $status='private_cache_path_unsafe';
+        } elseif (!$actual || !is_dir($configured) || !is_writable($configured)) {
+            $status='private_cache_not_writable';
+        }
+        return [
+            'configured'=>$configured,
+            'wordpress_root'=>$root?:'(unresolved)',
+            'parent'=>$parent?:'(unresolved)',
+            'resolved'=>$actual?:'(unresolved)',
+            'exists'=>is_dir($configured),
+            'writable'=>is_writable($configured),
+            'symlink'=>$linked,
+            'status'=>$status,
+        ];
+    }
     private static function storage_dir() {
         $dir=self::private_cache_dir();
         if (is_link($dir)) return new WP_Error('private_cache_path_unsafe');
@@ -851,7 +878,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.17</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.18</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -943,6 +970,14 @@ final class MWA_Audit {
         echo '<p><strong>Last scanner job:</strong> '.esc_html(is_array($scan_job)&&isset($scan_job['time'])?wp_date('Y-m-d H:i:s T',$scan_job['time']).' — '.($scan_job['status']??'unknown'):'Not run').'</p>';
         echo '<p><strong>Last severity job:</strong> '.esc_html(is_array($severity_job)&&isset($severity_job['time'])?wp_date('Y-m-d H:i:s T',$severity_job['time']).' — '.($severity_job['status']??'unknown'):'Not run').'</p>';
         echo '<p><strong>MainWP inventory:</strong> '.esc_html((string)count($inventory)).' installed items in the locally synced inventory.</p>';
+        $cache_probe=self::cache_path_diagnostics();
+        echo '<p><strong>Private cache path check (read-only):</strong> '.esc_html($cache_probe['status']).'</p>';
+        echo '<p><strong>Configured cache path:</strong> <code>'.esc_html($cache_probe['configured']).'</code></p>';
+        echo '<p><strong>Web PHP WordPress root:</strong> <code>'.esc_html($cache_probe['wordpress_root']).'</code></p>';
+        echo '<p><strong>Cache parent (resolved):</strong> <code>'.esc_html($cache_probe['parent']).'</code></p>';
+        echo '<p><strong>Cache path (resolved):</strong> <code>'.esc_html($cache_probe['resolved']).'</code></p>';
+        echo '<p><strong>Cache filesystem checks:</strong> '.esc_html('exists: '.($cache_probe['exists']?'yes':'no').'; writable: '.($cache_probe['writable']?'yes':'no').'; symlink: '.($cache_probe['symlink']?'yes':'no')).'</p>';
+
 
         // Local-only diagnostics: no API requests, remote sync, or cache writes.
         $inventory_keys=[];
