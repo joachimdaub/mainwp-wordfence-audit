@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.18
+ * Version: 0.5.19
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -15,6 +15,8 @@ final class MWA_Audit {
     const OPT_KEY = 'mwa_wordfence_key';
     const CACHE = 'mwa_wordfence_feed_v1';
     const INDEX_FILE = 'mainwp-wordfence-audit-index.json';
+    const DB_SCHEMA_VERSION = '1';
+    const DB_SCHEMA_OPTION = 'mwa_cache_schema_version';
     const LAST = 'mwa_wordfence_feed_updated';
     const SCANNER_DIAGNOSTICS = 'mwa_scanner_match_diagnostics_v1';
     const ENDPOINT = 'https://www.wordfence.com/api/intelligence/v3/vulnerabilities/scanner';
@@ -39,6 +41,7 @@ final class MWA_Audit {
     const COMBINED_STATE = 'mwa_combined_refresh_state';
     const MIN_INTERVAL = 2700; // 45 minutes, above the default Wordfence limit.
     public static function init() {
+        add_action('init', [__CLASS__, 'ensure_cache_table'], 1);
         add_action('init', [__CLASS__, 'ensure_schedule']);
         add_action(self::CRON_SCANNER, [__CLASS__, 'cron_scanner']);
         add_action(self::CRON_SEVERITY, [__CLASS__, 'cron_severity']);
@@ -442,8 +445,6 @@ final class MWA_Audit {
         update_option(self::NEXT_ATTEMPT, time() + self::MIN_INTERVAL, false);
         update_option('mwa_last_attempt', time(), false);
         // Stream directly to disk; WordPress must never buffer the full feed.
-        $dir = self::storage_dir();
-        if (is_wp_error($dir)) self::feed_error('Cache directory unavailable: '.$dir->get_error_code());
         $tmp = self::create_feed_temp_file('mwa-wordfence-feed.json');
         if (!$tmp) self::feed_error('Could not create temporary download file.');
         self::download_feed(self::ENDPOINT,$key,$tmp,'Wordfence');
@@ -494,15 +495,7 @@ final class MWA_Audit {
             unset($entry);
         }
         unset($entries);
-        $json = wp_json_encode($index['matches']);
-        if (!is_string($json)) self::feed_error('Could not encode vulnerability index.');
-        $target = trailingslashit($dir).self::INDEX_FILE;
-        $stage = $target.'.tmp-'.wp_generate_password(12,false,false);
-        if (file_put_contents($stage,$json,LOCK_EX)===false || !@rename($stage,$target)) {
-            @unlink($stage);
-            self::feed_error('Could not save vulnerability index.');
-        }
-        @chmod($target,0600);
+        if (!self::save_cached_index($index['matches'])) self::feed_error('Could not save scanner database index.');
         delete_option(self::ERROR_OPTION);
         delete_option(self::CACHE); // Remove legacy oversized option.
         update_option(self::LAST, time(), false);
@@ -520,8 +513,6 @@ final class MWA_Audit {
         if (!$old) self::redirect('no_scanner_feed');
         // The shared cooldown applies to both Wordfence endpoints.
         update_option(self::NEXT_ATTEMPT,time()+self::MIN_INTERVAL,false);
-        $dir=self::storage_dir();
-        if (is_wp_error($dir)) self::feed_error('Cache directory unavailable: '.$dir->get_error_code());
         $tmp=self::create_feed_temp_file('mwa-wordfence-production.json');
         if (!$tmp) self::feed_error('Could not create a temporary file.');
         self::download_feed(self::PRODUCTION_ENDPOINT,$key,$tmp,'Wordfence production feed');
@@ -531,15 +522,7 @@ final class MWA_Audit {
         if (is_wp_error($production)) self::feed_error('Production feed validation failed: '.$production->get_error_code());
         if (empty($production['seen'])) self::feed_error('Production feed contained no vulnerability records.');
         list($old,$enriched)=self::apply_severity($old,$production);
-        $payload=wp_json_encode($old);
-        if (!is_string($payload)) self::feed_error('Could not encode enriched index.');
-        $target=trailingslashit($dir).self::INDEX_FILE;
-        $stage=$target.'.tmp-'.wp_generate_password(12,false,false);
-        if (file_put_contents($stage,$payload,LOCK_EX)===false || !@rename($stage,$target)) {
-            @unlink($stage);
-            self::feed_error('Could not save enriched index.');
-        }
-        @chmod($target,0600);
+        if (!self::save_cached_index($old)) self::feed_error('Could not save enriched database index.');
         update_option(self::SEVERITY_UPDATED,time(),false);
         update_option('mwa_severity_enriched_count',$enriched,false);
         delete_option(self::ERROR_OPTION);
@@ -742,14 +725,45 @@ final class MWA_Audit {
         if ($error || $state!=='done') return new WP_Error($error?:'incomplete_json');
         return ['seen'=>$seen,'matches'=>$matches,'software_records'=>$software_records,'valid_slugs'=>$valid_slugs,'matched_records'=>$matched_records];
     }
+    public static function ensure_cache_table() {
+        global $wpdb;
+        if (get_option(self::DB_SCHEMA_OPTION)==self::DB_SCHEMA_VERSION) return true;
+        if (!isset($wpdb) || !method_exists($wpdb,'query')) return false;
+        require_once ABSPATH.'wp-admin/includes/upgrade.php';
+        $table=$wpdb->prefix.'mwa_vulnerability_cache';
+        $collate=$wpdb->get_charset_collate();
+        dbDelta("CREATE TABLE $table (
+            cache_id varchar(32) NOT NULL,
+            payload longtext NOT NULL,
+            updated_at datetime NOT NULL,
+            PRIMARY KEY  (cache_id)
+        ) $collate;");
+        $found=$wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s',$table));
+        if ($found!==$table) return false;
+        update_option(self::DB_SCHEMA_OPTION,self::DB_SCHEMA_VERSION,false);
+        return true;
+    }
+    private static function save_cached_index($index) {
+        global $wpdb;
+        if (!self::ensure_cache_table() || !is_array($index)) return false;
+        $json=wp_json_encode($index);
+        if (!is_string($json)) return false;
+        $table=$wpdb->prefix.'mwa_vulnerability_cache';
+        // A single-row UPSERT is atomic: a failed write leaves the previous payload intact.
+        $sql=$wpdb->prepare(
+            "INSERT INTO $table (cache_id,payload,updated_at) VALUES (%s,%s,%s)
+             ON DUPLICATE KEY UPDATE payload=VALUES(payload),updated_at=VALUES(updated_at)",
+            'scanner',$json,current_time('mysql',true)
+        );
+        return $wpdb->query($sql)!==false;
+    }
     private static function cached_index() {
-        $dir=self::storage_dir();
-        if (is_wp_error($dir)) return [];
-        $path=trailingslashit($dir).self::INDEX_FILE;
-        if (!is_readable($path)) return [];
-        $raw=@file_get_contents($path);
-        $decoded=is_string($raw)?json_decode($raw,true):null;
-        return is_array($decoded)?$decoded:[];
+        global $wpdb;
+        if (!self::ensure_cache_table()) return [];
+        $table=$wpdb->prefix.'mwa_vulnerability_cache';
+        $json=$wpdb->get_var($wpdb->prepare("SELECT payload FROM $table WHERE cache_id=%s",'scanner'));
+        $index=is_string($json)?json_decode($json,true):null;
+        return is_array($index)?$index:[];
     }
     private static function range_status($version, $ranges) {
         if (!is_array($ranges) || !$ranges || !is_string($version) || !preg_match('/^\d+(?:\.\d+)*(?:[-.]?(?:alpha|beta|rc)\d*)?$/i',$version)) return 'unknown';
@@ -878,7 +892,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.18</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.19</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
