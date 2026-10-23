@@ -7,9 +7,10 @@ function mwa_severity_assert($ok,$message) {
     if (!$ok) WP_CLI::error($message);
     WP_CLI::log('PASS: '.$message);
 }
-$path=dirname(rtrim(ABSPATH,'/\\')).'/mainwp-wordfence-audit-private/'.MWA_Audit::INDEX_FILE;
-$dir=dirname($path);
-if (!is_dir($dir) && !wp_mkdir_p($dir)) WP_CLI::error('Cannot create private fixture directory');
+$save_index=new ReflectionMethod('MWA_Audit','save_cached_index');
+$save_index->setAccessible(true);
+$read_index=new ReflectionMethod('MWA_Audit','cached_index');
+$read_index->setAccessible(true);
 $original=[
     'plugin/fixture-plugin'=>[
         ['id'=>'fixture-one','row'=>['title'=>'Keep title','cvss'=>['score'=>4.0]],'software'=>['type'=>'plugin','slug'=>'fixture-plugin']],
@@ -19,7 +20,7 @@ $original=[
         ['id'=>'fixture-three','row'=>['title'=>'Unchanged','cvss'=>['score'=>3.0]],'software'=>['type'=>'theme','slug'=>'fixture-theme']]
     ]
 ];
-file_put_contents($path,wp_json_encode($original));
+mwa_severity_assert($save_index->invoke(null,$original),'Fixture seeded in database cache');
 $payload=wp_json_encode([
     'fixture-one'=>['title'=>'External title','cvss'=>['score'=>9.8],'software'=>[['type'=>'plugin','slug'=>'fixture-plugin']]],
     'fixture-two'=>['title'=>'External second','cvss'=>['score'=>7.1],'software'=>[['type'=>'plugin','slug'=>'fixture-plugin']]],
@@ -43,7 +44,7 @@ $run=static function() use ($execute) {
 };
 update_option(MWA_Audit::NEXT_ATTEMPT,0,false);
 mwa_severity_assert($run()==='severity_updated','Production feed enriches cached scanner findings');
-$index=json_decode(file_get_contents($path),true);
+$index=$read_index->invoke(null);
 mwa_severity_assert($index['plugin/fixture-plugin'][0]['row']['cvss']['score']===9.8,'Matching ID receives new CVSS');
 mwa_severity_assert($index['plugin/fixture-plugin'][1]['row']['cvss']['score']===7.1,'Second matching ID receives CVSS');
 mwa_severity_assert($index['plugin/fixture-plugin'][0]['row']['title']==='Keep title','Scanner title is preserved');
@@ -52,16 +53,16 @@ mwa_severity_assert(count($index)===2,'Unmatched production software is not inse
 mwa_severity_assert((int)get_option('mwa_severity_enriched_count',-1)===2,'Enrichment count persisted');
 $updated=(int)get_option(MWA_Audit::SEVERITY_UPDATED,0);
 mwa_severity_assert($updated>0,'Successful enrichment timestamp persisted');
-$before=file_get_contents($path);
+$before=$read_index->invoke(null);
 $payload='{"broken":';
 update_option(MWA_Audit::NEXT_ATTEMPT,0,false);
 mwa_severity_assert($run()==='api_error','Malformed production JSON rejected');
-mwa_severity_assert(file_get_contents($path)===$before,'Malformed production feed preserves cache');
+mwa_severity_assert($read_index->invoke(null)===$before,'Malformed production feed preserves cache');
 mwa_severity_assert((int)get_option(MWA_Audit::SEVERITY_UPDATED,0)===$updated,'Failed refresh preserves success timestamp');
 $http_code=500;
 update_option(MWA_Audit::NEXT_ATTEMPT,0,false);
 mwa_severity_assert($run()==='api_error','HTTP 500 does not succeed');
-mwa_severity_assert(file_get_contents($path)===$before,'HTTP 500 preserves cache');
+mwa_severity_assert($read_index->invoke(null)===$before,'HTTP 500 preserves cache');
 mwa_severity_assert($requests===3,'All production requests intercepted locally');
 remove_filter('pre_http_request',$mock,10);
 WP_CLI::success('Production severity integration test passed');
