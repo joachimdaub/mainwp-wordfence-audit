@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.20
+ * Version: 0.5.21
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -944,7 +944,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.20</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.21</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -1021,7 +1021,26 @@ final class MWA_Audit {
         }
         echo '</div>';
         echo '<div style="background:#fff;border:1px solid #c3c4c7;padding:16px 20px;margin:14px 0;max-width:1080px">';
+        $scan_job=get_option('mwa_cron_scanner_result',[]);
+        $severity_job=get_option('mwa_cron_severity_result',[]);
+        $severity_when=(int)get_option(self::SEVERITY_UPDATED,0);
+        $scanner_ok=is_array($scan_job) && ($scan_job['status']??'')==='updated';
+        $severity_ok=is_array($severity_job) && ($severity_job['status']??'')==='severity_updated';
+        $fresh=$when>0 && (time()-$when)<=DAY_IN_SECONDS;
         echo '<h2 style="margin:0 0 12px">Data sources</h2>';
+        echo '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px">';
+        foreach ([
+            ['label'=>'Scanner feed','value'=>$when?wp_date('Y-m-d H:i T',$when):'Not loaded','ok'=>$scanner_ok && $fresh],
+            ['label'=>'Severity data','value'=>$severity_when?wp_date('Y-m-d H:i T',$severity_when):'Not loaded','ok'=>$severity_ok && $severity_when>0],
+            ['label'=>'Next scanner check','value'=>($scheduled=wp_next_scheduled(self::CRON_SCANNER))?wp_date('Y-m-d H:i T',$scheduled):'Not scheduled','ok'=>(bool)$scheduled],
+        ] as $source) {
+            echo '<div style="border:1px solid #c3c4c7;border-left:4px solid '.($source['ok']?'#00a32a':'#dba617').';padding:9px 12px;flex:1 1 180px;min-width:0">';
+            echo '<div style="font-weight:600">'.esc_html($source['label']).'</div><div>'.esc_html($source['value']).'</div>';
+            echo '</div>';
+        }
+        echo '</div>';
+        echo '<details style="margin:12px 0"><summary style="cursor:pointer;font-weight:600;padding:6px 0">Show detailed data source diagnostics</summary><div style="padding:4px 0 8px">';
+
         if ($last_error!=='') {
             echo '<p><strong>Last feed error:</strong> '.esc_html($last_error).'</p>';
         }
@@ -1038,7 +1057,7 @@ final class MWA_Audit {
 
         $scan_job=get_option('mwa_cron_scanner_result',[]);
         $severity_job=get_option('mwa_cron_severity_result',[]);
-        echo '<p><strong>Automatic updates:</strong> Daily WP-Cron (scanner + severity, separated by at least one hour).</p>';
+        echo '<p><strong>Automatic updates:</strong> '.(get_option(self::FAST_REFRESH,false)?'Scanner every 3 hours; severity every 6 hours.':'Daily scanner and severity.').' Shared API cooldown: 45 minutes.</p>';
         echo '<p><strong>Next scanner job:</strong> '.esc_html(($t=wp_next_scheduled(self::CRON_SCANNER))?wp_date('Y-m-d H:i:s T',$t):'Not scheduled').'</p>';
         echo '<p><strong>Last scanner job:</strong> '.esc_html(is_array($scan_job)&&isset($scan_job['time'])?wp_date('Y-m-d H:i:s T',$scan_job['time']).' — '.($scan_job['status']??'unknown'):'Not run').'</p>';
         echo '<p><strong>Last severity job:</strong> '.esc_html(is_array($severity_job)&&isset($severity_job['time'])?wp_date('Y-m-d H:i:s T',$severity_job['time']).' — '.($severity_job['status']??'unknown'):'Not run').'</p>';
@@ -1085,6 +1104,7 @@ final class MWA_Audit {
         echo '<p><strong>Next Wordfence request:</strong> '.($cooldown?esc_html(wp_date('Y-m-d H:i:s T',$next)).' ('.esc_html(human_time_diff(time(),$next)).' remaining)':'Available now').'</p>';
         $severity_when=(int)get_option(self::SEVERITY_UPDATED,0);
         echo '<p><strong>Severity data:</strong> '.($severity_when?esc_html(wp_date('Y-m-d H:i:s T',$severity_when)).' ('.esc_html((string)get_option('mwa_severity_enriched_count',0)).' records enriched)':'Not loaded (scanner feed does not contain CVSS)').'</p>';
+        echo '</div></details>';
         echo '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:14px">';
         echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="margin:0"><input type="hidden" name="action" value="mwa_inventory">';
         wp_nonce_field('mwa_inventory');
