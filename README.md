@@ -317,3 +317,9 @@ The matching vulnerability index is now stored in the dedicated `{prefix}mwa_vul
 If the new database row is absent, the plugin attempts to import a nonempty valid JSON cache from the old configured private directory or legacy uploads location without deleting the original file. Existing ignored-finding options and mail baselines are untouched. Do not interpret an empty cache as no known vulnerabilities. A previously overwritten empty JSON cache cannot reconstruct lost matches.
 
 The old path diagnostics are no longer displayed; database diagnostics and the remaining legacy helper code may be removed after the migration compatibility window. A successful staging run and CI confirmation are required before treating this as beta-ready.
+
+## Optional accelerated recurring feed checks (v0.5.20)
+
+Default behavior remains unchanged: scanner and production-severity feeds run once per day; the separate email notification job remains daily. Administrators can opt in under **Settings → Automatic feed refresh (preview)** to run the scanner every three hours and production severity every six hours. The first scheduled runs are staggered (initially 5 and 65 minutes from rescheduling), retaining the shared minimum 45-minute API cooldown. Existing recurring events are replaced only when their interval differs, and a second settings save/normal page load does not reset their schedules.
+
+Switching back to daily refresh is supported without resetting stored vulnerability data, ignore choices, last-known email findings, or notification cron. Saving the setting does not make an API request. Normal WP-Cron timing depends on site traffic or an external system cron, and combined/manual requests may consume the shared cooldown; occasional scheduled checks may therefore be skipped or throttled. This is a preview setting for controlled evaluation, not a guarantee of precisely timed polling.
