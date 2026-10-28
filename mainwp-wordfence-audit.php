@@ -4,7 +4,7 @@
  * Description: Read-only vulnerability inventory for MainWP sites using Wordfence Intelligence v3.
  *  Author: Joachim Daub
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
- * Version: 0.5.19
+ * Version: 0.5.20
  * Requires PHP: 7.4
  */
 if (!defined('ABSPATH')) exit;
@@ -39,10 +39,13 @@ final class MWA_Audit {
     const CRON_COMBINED_SCANNER = 'mwa_combined_scanner';
     const CRON_COMBINED_SEVERITY = 'mwa_combined_severity';
     const COMBINED_STATE = 'mwa_combined_refresh_state';
+    const FAST_REFRESH = 'mwa_fast_refresh_enabled';
     const MIN_INTERVAL = 2700; // 45 minutes, above the default Wordfence limit.
     public static function init() {
         add_action('init', [__CLASS__, 'ensure_cache_table'], 1);
+        add_filter('cron_schedules', [__CLASS__, 'cron_schedules']);
         add_action('init', [__CLASS__, 'ensure_schedule']);
+        add_action('admin_post_mwa_save_refresh_schedule', [__CLASS__, 'save_refresh_schedule']);
         add_action(self::CRON_SCANNER, [__CLASS__, 'cron_scanner']);
         add_action(self::CRON_SEVERITY, [__CLASS__, 'cron_severity']);
         add_action(self::CRON_COMBINED_SCANNER, [__CLASS__, 'combined_scanner']);
@@ -60,10 +63,35 @@ final class MWA_Audit {
         add_action('admin_post_mwa_ignore', [__CLASS__, 'ignore_action']);
         add_action('admin_post_mwa_inventory', [__CLASS__, 'inventory_refresh']);
     }
+    public static function cron_schedules($schedules) {
+        $schedules['mwa_three_hours']=['interval'=>3*HOUR_IN_SECONDS,'display'=>'Every three hours (MainWP Audit)'];
+        $schedules['mwa_six_hours']=['interval'=>6*HOUR_IN_SECONDS,'display'=>'Every six hours (MainWP Audit)'];
+        return $schedules;
+    }
+    private static function refresh_intervals() {
+        return get_option(self::FAST_REFRESH,false)
+            ? [self::CRON_SCANNER=>'mwa_three_hours',self::CRON_SEVERITY=>'mwa_six_hours']
+            : [self::CRON_SCANNER=>'daily',self::CRON_SEVERITY=>'daily'];
+    }
     public static function ensure_schedule() {
-        if (!wp_next_scheduled(self::CRON_SCANNER)) wp_schedule_event(time()+300, 'daily', self::CRON_SCANNER);
-        if (!wp_next_scheduled(self::CRON_SEVERITY)) wp_schedule_event(time()+3900, 'daily', self::CRON_SEVERITY);
-        if (!wp_next_scheduled(self::CRON_NOTIFY)) wp_schedule_event(time()+7200, 'daily', self::CRON_NOTIFY);
+        $offsets=[self::CRON_SCANNER=>300,self::CRON_SEVERITY=>3900];
+        foreach (self::refresh_intervals() as $hook=>$recurrence) {
+            $existing=wp_next_scheduled($hook);
+            if ($existing && wp_get_schedule($hook)===$recurrence) continue;
+            // Switch the recurrence without touching feed cache, notification baseline or other hooks.
+            if ($existing) wp_clear_scheduled_hook($hook);
+            wp_schedule_event(time()+$offsets[$hook],$recurrence,$hook);
+        }
+        if (!wp_next_scheduled(self::CRON_NOTIFY)) wp_schedule_event(time()+7200,'daily',self::CRON_NOTIFY);
+    }
+    public static function save_refresh_schedule() {
+        if (!self::allowed()) wp_die('Forbidden','',['response'=>403]);
+        check_admin_referer('mwa_save_refresh_schedule');
+        $enabled=isset($_POST['fast_refresh']) && $_POST['fast_refresh']==='1';
+        update_option(self::FAST_REFRESH,$enabled,false);
+        self::ensure_schedule();
+        wp_safe_redirect(add_query_arg(['page'=>'mwa-audit','mwa_tab'=>'settings','mwa_status'=>'refresh_schedule_saved'],admin_url(self::audit_base_file())));
+        exit;
     }
     public static function deactivate() {
         wp_clear_scheduled_hook(self::CRON_SCANNER);
@@ -916,7 +944,7 @@ final class MWA_Audit {
                 else $unknown[]=$pair;
             }
         }
-        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.19</small></h1>';
+        echo '<div class="wrap"><h1>MainWP Security Audit <small>v0.5.20</small></h1>';
         echo '<p class="description">Read-only vulnerability monitoring for MainWP-managed websites. No updates are performed on child sites.</p>';
         $next=(int)get_option(self::NEXT_ATTEMPT,0);
         $cooldown=time()<$next;
@@ -938,6 +966,15 @@ final class MWA_Audit {
             submit_button('Save API key','primary','submit',false);
             echo '</form>';
             echo '<p class="description">The standard API rate limit requires spacing requests. Feed refresh is available in Overview.</p></div>';
+            echo '<div class="card" style="max-width:760px;padding:18px 24px;margin-top:18px">';
+            echo '<h2>Automatic feed refresh (preview)</h2>';
+            echo '<p>Default: scanner and severity once daily. Optional: scanner every 3 hours, severity every 6 hours. The shared 45-minute API cooldown remains active.</p>';
+            echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'"><input type="hidden" name="action" value="mwa_save_refresh_schedule">';
+            wp_nonce_field('mwa_save_refresh_schedule');
+            echo '<p><label><input type="checkbox" name="fast_refresh" value="1" '.checked((bool)get_option(self::FAST_REFRESH,false),true,false).'> Enable more frequent checks (preview)</label></p>';
+            echo '<p class="description">Changes only the two recurring schedules. Does not trigger an immediate API request, modify stored findings or change the daily notification schedule. WordPress cron runs when triggered by traffic or the configured system cron.</p>';
+            submit_button('Save refresh schedule','secondary','submit',false);
+            echo '</form></div>';
             $email_enabled=(bool)get_option(self::EMAIL_ENABLED,true);
             $email_recipient=(string)get_option(self::EMAIL_RECIPIENT,'');
             echo '<div class="card" style="max-width:760px;padding:18px 24px;margin-top:18px">';
