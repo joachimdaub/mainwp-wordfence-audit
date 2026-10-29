@@ -34,7 +34,7 @@ jobs:
       - name: Build installable ZIP
         run: |
           mkdir -p dist/mainwp-wordfence-audit
-          cp mainwp-wordfence-audit.php dist/mainwp-wordfence-audit/
+          cp mainwp-wordfence-audit.php README.md readme.txt LICENSE dist/mainwp-wordfence-audit/
           if [ -d includes ]; then cp -R includes dist/mainwp-wordfence-audit/; fi
           if [ -d assets ]; then cp -R assets dist/mainwp-wordfence-audit/; fi
           cd dist
