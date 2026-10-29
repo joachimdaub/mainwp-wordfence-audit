@@ -445,6 +445,8 @@ final class MWA_Audit {
             'timeout'=>180,'redirection'=>0,
             'headers'=>['Authorization'=>'Bearer '.$key,'Accept'=>'application/json'],
             'stream'=>true,'filename'=>$tmp,
+            // Bound bytes written by WordPress HTTP transports, including unknown-length responses.
+            'limit_response_size'=>self::MAX_FEED_BYTES+1,
         ]);
         if (is_wp_error($res)) {
             @unlink($tmp);
