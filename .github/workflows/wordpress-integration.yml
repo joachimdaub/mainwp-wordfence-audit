@@ -46,6 +46,8 @@ jobs:
           mkdir -p /tmp/mwa-wp/wp-content/plugins/mainwp-wordfence-audit
           cp mainwp-wordfence-audit.php /tmp/mwa-wp/wp-content/plugins/mainwp-wordfence-audit/
           php /tmp/wp-cli.phar plugin activate mainwp-wordfence-audit --path=/tmp/mwa-wp
+      - name: Test fresh install and upgrade-state preservation
+        run: php /tmp/wp-cli.phar eval-file "$GITHUB_WORKSPACE/tests/integration/install-upgrade-lifecycle.php" --path=/tmp/mwa-wp
       - name: Run WordPress integration assertions
         run: php /tmp/wp-cli.phar eval-file "$GITHUB_WORKSPACE/tests/integration/wordpress-smoke.php" --path=/tmp/mwa-wp
       - name: Test scanner HTTP-to-cache refresh
