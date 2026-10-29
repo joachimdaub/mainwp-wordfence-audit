@@ -63,6 +63,32 @@ final class FeedHttpTest extends TestCase {
         $this->assertStringContainsString('timeout',(string)get_option(MWA_Audit::ERROR_OPTION));
     }
 
+    public function testOversizedHttp200DeletesFileAndReportsError(): void {
+        // Sparse test file avoids allocating hundreds of MiB in memory.
+        $file=tempnam(sys_get_temp_dir(),'mwa-large-');
+        $this->assertNotFalse($file);
+        $fp=fopen($file,'c+b');
+        $this->assertNotFalse($fp);
+        $this->assertTrue(ftruncate($fp,MWA_Audit::MAX_FEED_BYTES+1));
+        fclose($fp);
+        // A transfer may leave existing bytes; the guard must inspect actual on-disk size.
+        $GLOBALS['mwa_test_http_response']=['code'=>200,'headers'=>[]];
+        $download=new ReflectionMethod('MWA_Audit','download_feed');
+        $download->setAccessible(true);
+        $execute=new ReflectionMethod('MWA_Audit','cron_execute');
+        $execute->setAccessible(true);
+        try {
+            $status=$execute->invoke(null,'scanner',static function() use ($download,$file) {
+                $download->invoke(null,'scanner','fake-test-key',$file,'Test Wordfence');
+            });
+            $this->assertSame('api_error',$status);
+            $this->assertFileDoesNotExist($file);
+            $this->assertStringContainsString('maximum allowed size',(string)get_option(MWA_Audit::ERROR_OPTION));
+        } finally {
+            @unlink($file);
+        }
+    }
+
     public function testProductionFeedUsesSameHandling(): void {
         $GLOBALS['mwa_test_http_response']=['code'=>429,'headers'=>['retry-after'=>'120'],'body'=>'partial'];
         [$status,$exists]=$this->download(MWA_Audit::PRODUCTION_ENDPOINT);
