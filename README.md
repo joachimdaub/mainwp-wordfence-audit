@@ -1,6 +1,6 @@
 # MainWP Wordfence Audit
 
-**Status: v0.6.0-rc1 release candidate (not yet tagged or published). Not independently security-audited.**
+**Status: preparing v0.6.0-rc2; v0.6.0-rc1 is available as a private pre-release. Not independently security-audited.**
 
 Read-only WordPress plugin for the **MainWP Dashboard**. It compares locally synced MainWP plugin/theme versions with Wordfence Intelligence v3 vulnerability feeds and displays confirmed affected-version matches, uncertain matches and individually ignored findings. It does **not** update managed sites or perform a remote MainWP inventory sync.
 
