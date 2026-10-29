@@ -40,6 +40,7 @@ final class MWA_Audit {
     const CRON_COMBINED_SEVERITY = 'mwa_combined_severity';
     const COMBINED_STATE = 'mwa_combined_refresh_state';
     const FAST_REFRESH = 'mwa_fast_refresh_enabled';
+    const MAX_FEED_BYTES = 268435456; // 256 MiB; both endpoints share this cap.
     const MIN_INTERVAL = 2700; // 45 minutes, above the default Wordfence limit.
     public static function init() {
         add_action('init', [__CLASS__, 'ensure_cache_table'], 1);
@@ -459,6 +460,13 @@ final class MWA_Audit {
         if ($code!==200) {
             @unlink($tmp);
             self::feed_error($label.' HTTP '.$code.($code===429?' (rate limit reached)':''));
+        }
+        // Never parse or persist an oversized feed, even when the server reports HTTP 200.
+        clearstatcache(true,$tmp);
+        $size=@filesize($tmp);
+        if ($size===false || $size>self::MAX_FEED_BYTES) {
+            @unlink($tmp);
+            self::feed_error($label.' download exceeded maximum allowed size (256 MiB) or size could not be verified.');
         }
     }
     public static function refresh($scheduled=false) {
