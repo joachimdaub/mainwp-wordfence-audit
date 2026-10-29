@@ -795,6 +795,15 @@ final class MWA_Audit {
         );
         return $wpdb->query($sql)!==false;
     }
+    // Read-only legacy-file check. Files may be served by Nginx even when .htaccess is present.
+    private static function legacy_upload_cache_status($uploads) {
+        if (!is_array($uploads) || !empty($uploads['error']) || empty($uploads['basedir']) || !is_string($uploads['basedir'])) return 'unknown';
+        $dir=rtrim($uploads['basedir'],'/\\').'/mainwp-wordfence-audit';
+        $path=$dir.'/'.self::INDEX_FILE;
+        if (is_link($dir) || is_link($path)) return 'symlink';
+        if (is_file($path)) return 'present';
+        return 'absent';
+    }
     private static function import_legacy_cache() {
         // Migration is best-effort and never removes a source file.
         $paths=[];
@@ -1038,6 +1047,13 @@ final class MWA_Audit {
         $severity_ok=is_array($severity_job) && ($severity_job['status']??'')==='severity_updated';
         $fresh=$when>0 && (time()-$when)<=DAY_IN_SECONDS;
         echo '<h2 style="margin:0 0 12px">Data sources</h2>';
+        $legacy_status=self::legacy_upload_cache_status(wp_get_upload_dir());
+        if ($legacy_status==='present' || $legacy_status==='symlink') {
+            echo '<div class="notice notice-warning inline" style="margin:0 0 12px;padding:8px 12px"><p><strong>Legacy cache file detected:</strong> An older JSON cache or symlink exists in the WordPress uploads directory. It might be reachable over HTTP depending on web-server configuration. The current plugin uses the database and has not changed this file. After confirming the database cache is valid, check public access and remove or secure the legacy file manually.</p></div>';
+        } elseif ($legacy_status==='unknown') {
+            echo '<p class="description">Legacy uploads cache could not be checked; verify upload directory permissions if upgrading from a file-cache release.</p>';
+        }
+
         echo '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px">';
         foreach ([
             ['label'=>'Scanner feed','value'=>$when?wp_date('Y-m-d H:i T',$when):'Not loaded','ok'=>$scanner_ok && $fresh],
