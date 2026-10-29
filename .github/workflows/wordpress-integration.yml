@@ -60,5 +60,30 @@ jobs:
         run: php /tmp/wp-cli.phar eval-file "$GITHUB_WORKSPACE/tests/integration/database-cache-migration.php" --path=/tmp/mwa-wp
       - name: Test opt-in refresh schedule and rollback
         run: php /tmp/wp-cli.phar eval-file "$GITHUB_WORKSPACE/tests/integration/refresh-scheduling.php" --path=/tmp/mwa-wp
-      - name: Deactivate plugin
-        run: php /tmp/wp-cli.phar plugin deactivate mainwp-wordfence-audit --path=/tmp/mwa-wp
+      - name: Build and validate distributable ZIP
+        run: |
+          mkdir -p dist/mainwp-wordfence-audit
+          cp mainwp-wordfence-audit.php README.md readme.txt LICENSE dist/mainwp-wordfence-audit/
+          if [ -d includes ]; then cp -R includes dist/mainwp-wordfence-audit/; fi
+          if [ -d assets ]; then cp -R assets dist/mainwp-wordfence-audit/; fi
+          (cd dist && zip -qr mainwp-wordfence-audit.zip mainwp-wordfence-audit)
+          unzip -t dist/mainwp-wordfence-audit.zip
+          unzip -Z1 dist/mainwp-wordfence-audit.zip | grep -Fx 'mainwp-wordfence-audit/mainwp-wordfence-audit.php'
+          unzip -Z1 dist/mainwp-wordfence-audit.zip | grep -Fx 'mainwp-wordfence-audit/LICENSE'
+          unzip -Z1 dist/mainwp-wordfence-audit.zip | grep -Fx 'mainwp-wordfence-audit/readme.txt'
+          if unzip -Z1 dist/mainwp-wordfence-audit.zip | grep -E '(^|/)(tests|vendor|\.git|\.idea)/'; then
+            echo "Unexpected development file in release ZIP"
+            exit 1
+          fi
+      - name: Install release ZIP through WordPress and activate
+        run: |
+          php /tmp/wp-cli.phar plugin deactivate mainwp-wordfence-audit --path=/tmp/mwa-wp --quiet || true
+          php /tmp/wp-cli.phar plugin delete mainwp-wordfence-audit --path=/tmp/mwa-wp
+          php /tmp/wp-cli.phar plugin install "$GITHUB_WORKSPACE/dist/mainwp-wordfence-audit.zip" --activate --path=/tmp/mwa-wp
+          php /tmp/wp-cli.phar plugin is-active mainwp-wordfence-audit --path=/tmp/mwa-wp
+          php /tmp/wp-cli.phar eval 'if (!MWA_Audit::ensure_cache_table()) { WP_CLI::error("ZIP-installed plugin cannot initialize database cache"); }' --path=/tmp/mwa-wp
+      - name: Upload installable ZIP from CI
+        uses: actions/upload-artifact@v4
+        with:
+          name: mainwp-wordfence-audit-ci-zip
+          path: dist/mainwp-wordfence-audit.zip
