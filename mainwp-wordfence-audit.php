@@ -6,6 +6,8 @@
  *  Author URI: https://github.com/joachimdaub/mainwp-wordfence-audit
  * Version: 0.6.0-rc1
  * Requires PHP: 7.4
+ * License: GPL-2.0-or-later
+ * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
  */
 if (!defined('ABSPATH')) exit;
 
