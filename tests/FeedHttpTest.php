@@ -35,6 +35,7 @@ final class FeedHttpTest extends TestCase {
         $this->assertTrue($exists);
         $this->assertSame('{"vuln":{}}',$body);
         $this->assertTrue($GLOBALS['mwa_test_http_requests'][0]['args']['stream']);
+        $this->assertSame(MWA_Audit::MAX_FEED_BYTES+1,$GLOBALS['mwa_test_http_requests'][0]['args']['limit_response_size']);
     }
 
     public function testHttp429StoresRetryAfterAndDeletesPartialFile(): void {
@@ -96,5 +97,6 @@ final class FeedHttpTest extends TestCase {
         $this->assertFalse($exists);
         $this->assertGreaterThanOrEqual(time()+3500,(int)get_option(MWA_Audit::NEXT_ATTEMPT));
         $this->assertSame(MWA_Audit::PRODUCTION_ENDPOINT,$GLOBALS['mwa_test_http_requests'][0]['url']);
+        $this->assertSame(MWA_Audit::MAX_FEED_BYTES+1,$GLOBALS['mwa_test_http_requests'][0]['args']['limit_response_size']);
     }
 }
