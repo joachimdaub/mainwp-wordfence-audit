@@ -15,9 +15,9 @@ Scope: Static review of the plugin entrypoint at the current pre-release state; 
 
 ## Release blockers / follow-up work
 
-### SR-01 — Full-feed download quotas (medium; partially mitigated, still open)
+### SR-01 — Full-feed download quotas (medium; transport bound implemented, runtime verification pending)
 
-`download_feed()` uses streamed WordPress HTTP transfers and a 180-second timeout but has no explicit response-size cap. `stream_index()` bounds individual JSON records to 8 MiB, but this cap runs **after** the full response is downloaded. Repeated large/error responses could exhaust shared-hosting temporary disk space. A 256 MiB post-download size check now rejects oversized HTTP-200 feeds before parsing and deletes their temporary file. **This does not stop the HTTP transfer before 256 MiB is written**, so the disk-exhaustion risk is only partially mitigated. Add transfer-time enforcement or an equivalent bounded transport design, plus free-space checks. Add tests for oversized and truncated responses, including HTTP 200.
+`download_feed()` uses streamed WordPress HTTP transfers and a 180-second timeout but has no explicit response-size cap. `stream_index()` bounds individual JSON records to 8 MiB, but this cap runs **after** the full response is downloaded. Repeated large/error responses could exhaust shared-hosting temporary disk space. A 256 MiB post-download size check now rejects oversized HTTP-200 feeds before parsing and deletes their temporary file. The WordPress HTTP request now passes `limit_response_size = 256 MiB + 1 byte` for both feeds, which caps the bytes retained/written by supported WordPress HTTP transports. The existing file-size check rejects a boundary-truncated response before JSON parsing. This is a transport-level bound, **not a guarantee of an early network disconnect** on every transport. Production transport compatibility and free-space handling still need verification. Add tests for oversized and truncated responses, including HTTP 200.
 
 ### SR-02 — Legacy uploads JSON exposure (medium; review before public beta)
 
