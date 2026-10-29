@@ -3,7 +3,7 @@ Contributors: joachimdaub
 Tags: mainwp, vulnerabilities, security, monitoring, wordfence
 Requires at least: 6.0
 Requires PHP: 7.4
-Stable tag: 0.5.21
+Stable tag: 0.6.0-rc1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -40,10 +40,10 @@ In a dedicated database table in the dashboard site's WordPress database. Feed d
 
 == Changelog ==
 
-= 0.5.21 =
-* Pre-release candidate with database-backed index, scheduled refreshes, notification support and compact diagnostics.
+= 0.6.0-rc1 =
+* Release candidate with database-backed index, scheduled refreshes, notification support and compact diagnostics.
 
 == Upgrade Notice ==
 
-= 0.5.21 =
+= 0.6.0-rc1 =
 Pre-release only. Back up your site before installing or upgrading. Existing ignored findings and known-notification keys are preserved by the current migration implementation.
