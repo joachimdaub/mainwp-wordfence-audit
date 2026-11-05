@@ -45,6 +45,7 @@ final class MWA_Audit {
     const MAX_FEED_BYTES = 268435456; // 256 MiB; both endpoints share this cap.
     const MIN_INTERVAL = 2700; // 45 minutes, above the default Wordfence limit.
     public static function init() {
+        add_filter('mwa_readonly_export_v1', [__CLASS__, 'export_v1']);
         add_action('init', [__CLASS__, 'ensure_cache_table'], 1);
         add_filter('cron_schedules', [__CLASS__, 'cron_schedules']);
         add_action('init', [__CLASS__, 'ensure_schedule']);
@@ -194,6 +195,97 @@ final class MWA_Audit {
             if ($type==='scanner') self::refresh(true);
             else self::enrich_severity(true);
         });
+    }
+    /**
+     * Public local read-only contract v1. No refresh, migration, option writes or HTTP.
+     * Export only current-user-visible MainWP sites; never grant a background-user fallback.
+     * @return array|WP_Error See docs/read-only-export.md.
+     */
+    public static function export_v1($unused = null) {
+        if (!self::allowed()) return new WP_Error('mwa_export_forbidden');
+        if (!class_exists('\\MainWP\\Dashboard\\MainWP_DB')) return new WP_Error('mwa_export_mainwp_unavailable');
+        global $wpdb;
+        $now=time();
+        $scanner=(int)get_option(self::LAST,0);
+        $severity=(int)get_option(self::SEVERITY_UPDATED,0);
+        // Deliberately bypass cached_index(): it can migrate legacy state on read.
+        $index=null;
+        if (get_option(self::DB_SCHEMA_OPTION)===self::DB_SCHEMA_VERSION) {
+            $table=$wpdb->prefix.'mwa_vulnerability_cache';
+            $raw=$wpdb->get_var($wpdb->prepare("SELECT payload FROM $table WHERE cache_id=%s",'scanner'));
+            if (is_string($raw)) $index=json_decode($raw,true);
+        }
+        $feed_status=!is_array($index) || !$scanner ? 'missing' : (
+            get_option(self::ERROR_OPTION,'') ? 'error' : (
+                $scanner>$now+300 || $severity>$now+300 ? 'invalid_time' : (
+                    $now-$scanner>172800 || !$severity || $now-$severity>259200 ? 'stale' : 'fresh'
+                )
+            )
+        );
+        $out=['schema_version'=>1,'generated_at'=>gmdate('Y-m-d\TH:i:s\Z',$now),
+            'feed'=>['status'=>$feed_status,'scanner_at'=>$scanner?gmdate('Y-m-d\TH:i:s\Z',$scanner):null,
+                'severity_at'=>$severity?gmdate('Y-m-d\TH:i:s\Z',$severity):null,
+                'scanner_max_age'=>172800,'severity_max_age'=>259200],
+            'assessment_scope'=>['plugins','themes'],'sites'=>[]];
+        $db=\MainWP\Dashboard\MainWP_DB::instance();
+        $sites=$db->get_websites_by_user_id(get_current_user_id());
+        if (!is_array($sites)) return new WP_Error('mwa_export_inventory_unavailable');
+        $ignored=get_option(self::IGNORED,[]);
+        if (!is_array($ignored)) $ignored=[];
+        foreach ($sites as $site) {
+            if (!is_object($site) || empty($site->id)) continue;
+            $entry=['mainwp_site_id'=>(int)$site->id,'status'=>'incomplete','inventory_at'=>null,
+                'observed_at'=>null,'complete'=>false,'findings'=>[]];
+            try {
+                $full=$db->get_website_by_id((int)$site->id);
+                if (!$full) throw new RuntimeException('missing');
+                $sync=(int)($full->dtsSync??0);
+                $entry['inventory_at']=$sync?gmdate('Y-m-d\TH:i:s\Z',$sync):null;
+                $observation=$sync && $scanner ? min($sync,$scanner) : 0;
+                $entry['observed_at']=$observation?gmdate('Y-m-d\TH:i:s\Z',$observation):null;
+                $complete=$sync>0 && $sync<=$now+300 && $now-$sync<=86400 && empty($full->sync_errors);
+                foreach (['plugins'=>'plugin','themes'=>'theme'] as $field=>$type) {
+                    $raw=$full->{$field}??null;
+                    if ($raw===null || $raw==='') $raw=$db->get_website_option((array)$full,$field,null);
+                    $items=self::export_inventory_items($raw);
+                    if ($items===null) { $complete=false; continue; }
+                    foreach ($items as $raw_item) {
+                        $item=self::normalize_inventory_item($raw_item,$type,(string)($full->url??''));
+                        if ($item===null) { $complete=false; continue; }
+                        foreach (($index[$type.'/'.strtolower($item['slug'])]??[]) as $v) {
+                            if (!is_array($v) || !isset($v['id'],$v['software']) || !is_array($v['software'])) { $complete=false; continue; }
+                            $match=self::range_status($item['version'],$v['software']['affected_versions']??null);
+                            if ($match==='unknown') $complete=false;
+                            $rating=strtolower(explode(' ',self::severity($v))[0]);
+                            if ($rating==='informational') $rating='info';
+                            if (!in_array($rating,['critical','high','medium','low','info'],true)) { $rating='unknown'; $complete=false; }
+                            $entry['findings'][]=[
+                                'finding_id'=>hash('sha256',$type.'|'.strtolower($item['slug']).'|'.(string)$v['id']),
+                                'advisory_id'=>(string)$v['id'],
+                                'component'=>['type'=>$type,'slug'=>$item['slug'],'version'=>$item['version']],
+                                'severity'=>$rating,'affected_version_match'=>$match,
+                                'status'=>isset($ignored[self::finding_key($item,$v)])?'ignored':'open',
+                                'title'=>substr(wp_strip_all_tags((string)($v['row']['title']??$v['id'])),0,300),
+                                'observed_at'=>$entry['observed_at']
+                            ];
+                        }
+                    }
+                }
+                $entry['complete']=$complete && $feed_status==='fresh';
+                $entry['status']=$entry['complete']?'ready':'incomplete';
+            } catch (Throwable $e) { $entry['status']='error'; $entry['complete']=false; }
+            $out['sites'][]=$entry;
+        }
+        return $out;
+    }
+    /** Distinguish empty inventory from missing/malformed data, without instantiating objects. */
+    private static function export_inventory_items($raw) {
+        if (is_array($raw)) return $raw;
+        if (!is_string($raw) || $raw==='') return null;
+        $json=json_decode($raw,true);
+        if (is_array($json)) return $json;
+        $php=@unserialize($raw,['allowed_classes'=>false]);
+        return is_array($php)?$php:null;
     }
     private static function current_findings() {
         list($inventory,$error)=self::inventory();
@@ -1245,3 +1337,6 @@ final class MWA_Audit {
 }
 MWA_Audit::init();
 register_deactivation_hook(__FILE__, ['MWA_Audit','deactivate']);
+
+/** Stable local PHP entry point. No public HTTP route is registered. */
+function mwa_export_findings_v1() { return MWA_Audit::export_v1(); }

@@ -9,6 +9,7 @@ final class MainWP_DB {
     public function get_website_by_id($id) {
         return (object)[
             'id'=>9,'url'=>'https://fixture.example.test',
+            'privkey'=>'private-key-sentinel','http_pass'=>'http-password-sentinel',
             'plugins'=>json_encode(self::$plugins),
             'themes'=>'[]'
         ];
