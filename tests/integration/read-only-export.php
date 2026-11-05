@@ -1,0 +1,48 @@
+<?php
+require_once __DIR__.'/mainwp-fixture.php';
+function mwa_export_assert($ok,$message) { if (!$ok) WP_CLI::error($message); WP_CLI::log('PASS: '.$message); }
+wp_set_current_user(0);
+mwa_export_assert(is_wp_error(mwa_export_findings_v1()),'Anonymous PHP export denied');
+$subscriber=get_user_by('login','mwasubscriber');
+if ($subscriber) { wp_set_current_user($subscriber->ID); mwa_export_assert(is_wp_error(apply_filters('mwa_readonly_export_v1',null)),'Subscriber export hook denied'); }
+wp_set_current_user(get_user_by('login','mwaadmin')->ID);
+MainWP\Dashboard\MainWP_DB::$plugins=[['file'=>'fixture-plugin/plugin.php','version'=>'1.5']];
+$save=new ReflectionMethod(MWA_Audit::class,'save_cached_index'); $save->setAccessible(true);
+$index=['plugin/fixture-plugin'=>[['id'=>'advisory-1','row'=>['title'=>'Export finding','severity'=>'critical'],'software'=>['affected_versions'=>[['from_version'=>'1.0','from_inclusive'=>true,'to_version'=>'2.0','to_inclusive'=>true]]]]]];
+$save->invoke(null,$index);
+update_option(MWA_Audit::LAST,time()-60,false);
+update_option(MWA_Audit::SEVERITY_UPDATED,time()-30,false);
+update_option(MWA_Audit::ERROR_OPTION,'',false);
+update_option(MWA_Audit::OPT_KEY,'secret-sentinel-must-not-export',false);
+$writes=[]; $http=0;
+$query=static function($sql) use (&$writes) { if (preg_match('/^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE)\b/i',$sql)) $writes[]=$sql; return $sql; };
+$network=static function($pre) use (&$http) { $http++; return new WP_Error('unexpected_export_http'); };
+add_filter('query',$query); add_filter('pre_http_request',$network);
+$export=mwa_export_findings_v1();
+remove_filter('query',$query); remove_filter('pre_http_request',$network);
+mwa_export_assert($writes===[] && $http===0,'Export has no SQL writes or HTTP calls');
+mwa_export_assert($export['schema_version']===1 && $export['assessment_scope']===['plugins','themes'],'Versioned scope contract');
+mwa_export_assert($export['feed']['status']==='fresh','Independent feed times recognized');
+mwa_export_assert($export['sites'][0]['mainwp_site_id']===9,'Numeric MainWP identity retained');
+$f=$export['sites'][0]['findings'][0];
+mwa_export_assert($f['finding_id']===hash('sha256','plugin|fixture-plugin|advisory-1'),'Stable URL/version-independent finding identity');
+mwa_export_assert($f['severity']==='critical' && $f['affected_version_match']==='affected' && $f['status']==='open','Existing matching/severity logic exported');
+mwa_export_assert(!str_contains(wp_json_encode($export),'secret-sentinel-must-not-export') && !str_contains(wp_json_encode($export),'private-key-sentinel') && !str_contains(wp_json_encode($export),'http-password-sentinel'),'API and MainWP credentials not returned');
+$repeat=mwa_export_findings_v1(); unset($repeat['generated_at']); $compare=$export; unset($compare['generated_at']);
+mwa_export_assert($repeat===$compare,'Repeated export deterministic apart from generated wall clock');
+$key=hash('sha256','https://fixture.example.test|plugin|fixture-plugin|advisory-1');
+update_option(MWA_Audit::IGNORED,[$key=>['timestamp'=>time()]],false);
+mwa_export_assert(mwa_export_findings_v1()['sites'][0]['findings'][0]['status']==='ignored','Audit ignore state exported');
+MainWP\Dashboard\MainWP_DB::$plugins=[['file'=>'fixture-plugin/plugin.php','version'=>'3.0']];
+$corrected=mwa_export_findings_v1()['sites'][0]['findings'][0];
+mwa_export_assert($corrected['finding_id']===$f['finding_id'] && $corrected['affected_version_match']==='unaffected','Corrected version retains ID and supplies explicit negative match');
+update_option(MWA_Audit::LAST,time()-172801,false);
+mwa_export_assert(mwa_export_findings_v1()['feed']['status']==='stale','Scanner cadence respected');
+update_option(MWA_Audit::LAST,time()-60,false); update_option(MWA_Audit::SEVERITY_UPDATED,time()-259201,false);
+mwa_export_assert(mwa_export_findings_v1()['feed']['status']==='stale','Severity cadence independently respected');
+update_option(MWA_Audit::ERROR_OPTION,'secret-sentinel-error-detail',false);
+$failed=mwa_export_findings_v1();
+mwa_export_assert($failed['feed']['status']==='error' && !str_contains(wp_json_encode($failed),'secret-sentinel-error-detail'),'Error state excludes raw diagnostic text');
+update_option(MWA_Audit::LAST,0,false);
+mwa_export_assert(mwa_export_findings_v1()['feed']['status']==='missing','Missing successful observation is unknown');
+WP_CLI::success('Read-only export contract passed');

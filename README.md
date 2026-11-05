@@ -55,3 +55,13 @@ GPL-2.0-or-later. See `LICENSE`.
 ## Development history
 
 Historical development notes and superseded implementation details are archived in [docs/development-history.md](docs/development-history.md). For release-specific changes, see the [release notes](RELEASE_NOTES_0.6.0-rc2.md).
+
+## Local integration API
+
+`mwa_export_findings_v1()` (or `mwa_readonly_export_v1`) exposes a versioned,
+capability-checked, read-only view of the existing local results for consumers
+such as Security Hub. It never refreshes feeds or changes child sites. It includes
+stable component/advisory IDs, match/ignore state, original observations, feed
+freshness and explicit plugin/theme scope, without secrets. See
+[the v1 contract and limitations](docs/read-only-export.md). Existing UI,
+notifications, feed refreshes and ignored decisions remain unchanged.

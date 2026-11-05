@@ -60,6 +60,8 @@ jobs:
         run: php /tmp/wp-cli.phar eval-file "$GITHUB_WORKSPACE/tests/integration/database-cache-migration.php" --path=/tmp/mwa-wp
       - name: Test opt-in refresh schedule and rollback
         run: php /tmp/wp-cli.phar eval-file "$GITHUB_WORKSPACE/tests/integration/refresh-scheduling.php" --path=/tmp/mwa-wp
+      - name: Test read-only local export contract
+        run: php /tmp/wp-cli.phar eval-file "$GITHUB_WORKSPACE/tests/integration/read-only-export.php" --path=/tmp/mwa-wp
       - name: Build and validate distributable ZIP
         run: |
           mkdir -p dist/mainwp-wordfence-audit
